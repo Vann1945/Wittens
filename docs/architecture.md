@@ -42,7 +42,7 @@ This is the same shape as [cobalt](https://github.com/imputnet/cobalt): *validat
 ## api layers
 
 ```
-api/src/
+backend/src/
 ├─ wittens.ts             entrypoint: config, wiring, listen, graceful shutdown
 ├─ config.ts              typed, validated environment (fails fast on bad values)
 ├─ core/api.ts            express app: routes, rate limits, headers, errors
@@ -91,8 +91,8 @@ Rules the layers follow:
 
 A provider is an object with a `name` and a `resolve(url, signal)` method that returns a `ProviderResult` or throws an `ApiError`.
 
-1. Create `api/src/processing/providers/<name>.ts`. Keep every upstream-specific field name in that file.
-2. Add a test next to `api/test/tikwm.test.ts` using a fake `Fetcher`. Cover success, "not found", rate limiting, timeouts and malformed responses.
-3. Wire it in `api/src/wittens.ts`.
+1. Create `backend/src/processing/providers/<name>.ts`. Keep every upstream-specific field name in that file.
+2. Add a test next to `backend/test/tikwm.test.ts` using a fake `Fetcher`. Cover success, "not found", rate limiting, timeouts and malformed responses.
+3. Wire it in `backend/src/wittens.ts`.
 
 Adding another **service** (not just another provider) also means extending `Service` and the host check in `processing/url.ts`, and registering a provider for it in `core/api.ts`. Read [CONTRIBUTING.md](../CONTRIBUTING.md) for what is in scope first.

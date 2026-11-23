@@ -27,11 +27,11 @@ Where things live:
 
 | you want to change | look in |
 | :-- | :-- |
-| link validation | `api/src/processing/url.ts` |
-| how a post is resolved | `api/src/processing/providers/` |
-| the public response | `api/src/processing/match.ts`, `types.ts` and `web/src/types.ts` |
-| streaming and downloads | `api/src/stream/` |
-| rate limits, headers, routes | `api/src/core/api.ts` |
+| link validation | `backend/src/processing/url.ts` |
+| how a post is resolved | `backend/src/processing/providers/` |
+| the public response | `backend/src/processing/match.ts`, `types.ts` and `web/src/types.ts` |
+| streaming and downloads | `backend/src/stream/` |
+| rate limits, headers, routes | `backend/src/core/api.ts` |
 | the ui | `web/src/` |
 
 Read [docs/architecture.md](docs/architecture.md) once, it takes five minutes.
@@ -57,7 +57,7 @@ A bug fix should include a test that fails without the fix.
 
 ## documentation
 
-If you change the api, an environment variable or the flow, update `docs/` in the same pull request. The response type lives in two places (`api/src/processing/types.ts` and `web/src/types.ts`), change both.
+If you change the api, an environment variable or the flow, update `docs/` in the same pull request. The response type lives in two places (`backend/src/processing/types.ts` and `web/src/types.ts`), change both.
 
 ## commits and pull requests
 
