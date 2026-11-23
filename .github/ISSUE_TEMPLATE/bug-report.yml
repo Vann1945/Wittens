@@ -1,0 +1,28 @@
+name: bug report
+description: something doesn't work the way it should
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: what happened?
+      description: what you did, what you expected, what you got instead. do not paste private links.
+    validations:
+      required: true
+  - type: input
+    id: error-code
+    attributes:
+      label: error code
+      description: "the `error.code` from the response, if any (e.g. `error.provider.rate_limited`)"
+  - type: dropdown
+    id: where
+    attributes:
+      label: where does it happen?
+      options: [the hosted/self-hosted web app, the api directly, docker image, local development]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: version
+      description: "`version` from `GET /api`"

@@ -1,0 +1,20 @@
+# Copy to the repository root as docker-compose.yml, then run: docker compose up -d --build
+services:
+  wittens:
+    build: ../..
+    container_name: wittens
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      # Bind to localhost only when a reverse proxy runs on the same host:
+      # API_LISTEN_ADDRESS: "127.0.0.1"
+      # Number of reverse proxies in front of wittens (needed for correct rate limiting):
+      TRUST_PROXY: "1"
+      RATELIMIT_MAX: "20"
+      TUNNEL_LIFESPAN: "900"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
