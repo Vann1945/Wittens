@@ -1,9 +1,9 @@
-import { loadConfig, loadEnvFile } from '../backend/src/config.js';
-import { createApp } from '../backend/src/core/api.js';
-import { getVersion } from '../backend/src/misc/version.js';
-import { createTikWmProvider } from '../backend/src/processing/providers/tikwm.js';
-import { createGuardedFetcher } from '../backend/src/stream/fetcher.js';
-import { TunnelStore } from '../backend/src/stream/store.js';
+import { loadConfig, loadEnvFile } from './src/config.js';
+import { createApp } from './src/core/api.js';
+import { getVersion } from './src/misc/version.js';
+import { createTikWmProvider } from './src/processing/providers/tikwm.js';
+import { createGuardedFetcher } from './src/stream/fetcher.js';
+import { TunnelStore } from './src/stream/store.js';
 
 loadEnvFile();
 

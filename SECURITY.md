@@ -10,7 +10,7 @@ You can expect an acknowledgment within a few days. Fixes are released as soon a
 
 ## what is in scope
 
-- SSRF, open redirects or request smuggling through the media proxy (`backend/src/stream/`, `backend/src/security/`)
+- SSRF, open redirects or request smuggling through the media proxy (`api/src/stream/`, `api/src/security/`)
 - bypassing link validation or tunnel tokens
 - response header, content-type or file name injection
 - denial of service that goes beyond what the rate limits and timeouts are meant to handle

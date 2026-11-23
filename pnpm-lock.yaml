@@ -8,7 +8,7 @@ importers:
 
   .: {}
 
-  backend:
+  api:
     dependencies:
       dotenv:
         specifier: ^17.2.3

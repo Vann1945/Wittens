@@ -89,7 +89,7 @@ Rate limit state is exposed in the standard `RateLimit` and `RateLimit-Policy` r
 
 The response shape is defined twice, on purpose, so the two packages stay independently buildable:
 
-- `backend/src/processing/types.ts` (`ResolvedVideo`)
+- `api/src/processing/types.ts` (`ResolvedVideo`)
 - `web/src/types.ts` (`ResolvedVideo`, `ResolveResponse`)
 
-Change both, `backend/test/api.test.ts`, and this document together.
+Change both, `api/test/api.test.ts`, and this document together.
