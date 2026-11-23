@@ -1,0 +1,7 @@
+{
+  "name": "Wittens",
+  "description": "Wittens is a free, open source TikTok downloader. Paste a link, get the file. No watermark, no ads, no tracking.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

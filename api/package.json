@@ -1,5 +1,5 @@
 {
-  "name": "@wittens/api",
+  "name": "api",
   "description": "wittens processing api",
   "version": "1.0.0",
   "type": "module",

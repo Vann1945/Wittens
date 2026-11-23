@@ -77,7 +77,7 @@ export function loadConfig(env: Env = process.env): Config {
     host: readString(env, 'API_LISTEN_ADDRESS') ?? '0.0.0.0',
     webDistPath: readString(env, 'WEB_DIST_PATH'),
     corsOrigin: readCorsOrigin(env),
-    trustProxy: readInt(env, 'TRUST_PROXY', 0, 0, 10),
+    trustProxy: readInt(env, 'TRUST_PROXY', 1, 0, 10),
     rateLimitWindowMs: readInt(env, 'RATELIMIT_WINDOW', 60, 1, 86_400) * 1000,
     rateLimitMax: readInt(env, 'RATELIMIT_MAX', 20, 1, 10_000),
     tunnelRateLimitMax: readInt(env, 'TUNNEL_RATELIMIT_MAX', 120, 1, 100_000),

@@ -1,5 +1,5 @@
 {
-  "name": "@wittens/web",
+  "name": "web",
   "description": "wittens web app",
   "version": "1.0.0",
   "type": "module",

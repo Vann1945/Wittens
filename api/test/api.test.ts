@@ -109,11 +109,30 @@ describe('POST /api/resolve', () => {
     assert.equal(JSON.parse(text).error.code, 'error.internal');
   });
 
-  it('rate limits per client', async () => {
+  it('rate limits per client and accepts Forwarded / X-Forwarded-For headers without validation errors', async () => {
     server = await startTestServer({ config: { rateLimitMax: 2 } });
-    assert.equal((await postResolve(server.base, { url: VALID })).status, 200);
-    assert.equal((await postResolve(server.base, { url: VALID })).status, 200);
-    const limited = await postResolve(server.base, { url: VALID });
+    const headers = {
+      'Content-Type': 'application/json',
+      Forwarded: 'for=203.0.113.195;proto=https',
+      'X-Forwarded-For': '203.0.113.195',
+    };
+    const r1 = await fetch(`${server.base}/api/resolve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ url: VALID }),
+    });
+    assert.equal(r1.status, 200);
+    const r2 = await fetch(`${server.base}/api/resolve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ url: VALID }),
+    });
+    assert.equal(r2.status, 200);
+    const limited = await fetch(`${server.base}/api/resolve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ url: VALID }),
+    });
     assert.equal(limited.status, 429);
     assert.equal((await limited.json()).error.code, 'error.rate_exceeded');
   });

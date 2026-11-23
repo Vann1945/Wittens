@@ -16,6 +16,7 @@ export function parseCaptionAndHashtags(raw: string): {
   const caption = raw
     .replace(/#[\p{L}\p{N}_]+/gu, '')
     .replace(/[ \t]{2,}/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 

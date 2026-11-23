@@ -35,7 +35,6 @@ function sendError(res: Response, error: ApiError): void {
 
 const SECURITY_HEADERS: Record<string, string> = {
   'X-Content-Type-Options': 'nosniff',
-  'X-Frame-Options': 'DENY',
   'Referrer-Policy': 'no-referrer',
   'Permissions-Policy': 'camera=(), microphone=(), geolocation=(), clipboard-read=(self)',
   'Content-Security-Policy': [
@@ -48,7 +47,6 @@ const SECURITY_HEADERS: Record<string, string> = {
     "object-src 'none'",
     "base-uri 'none'",
     "form-action 'self'",
-    "frame-ancestors 'none'",
   ].join('; '),
 };
 
@@ -90,6 +88,7 @@ export function createApp({ config, version, provider, tunnels, mediaFetcher }: 
     limit: config.rateLimitMax,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+    validate: false,
     handler: handleRateExceeded,
   });
 
@@ -98,6 +97,7 @@ export function createApp({ config, version, provider, tunnels, mediaFetcher }: 
     limit: config.tunnelRateLimitMax,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
+    validate: false,
     handler: handleRateExceeded,
   });
 

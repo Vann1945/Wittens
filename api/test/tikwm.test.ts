@@ -8,7 +8,7 @@ const link = new URL('https://www.tiktok.com/@user/video/1');
 const signal = new AbortController().signal;
 
 function providerWith(fetcher: Fetcher) {
-  return createTikWmProvider({ apiUrl: 'https://www.tikwm.com/api/', fetcher, userAgent: 'test' });
+  return createTikWmProvider({ apiUrl: 'https://api.tikwm.test/api/', fetcher, userAgent: 'test' });
 }
 
 const json = (body: unknown, status = 200) =>
@@ -56,9 +56,51 @@ describe('tikwm provider', () => {
     assert.equal(result.authorHandle, '@someone');
     assert.equal(result.hd?.url, 'https://cdn.example.com/hd.mp4');
     assert.equal(result.hd?.sizeBytes, 200);
-    assert.equal(result.sd?.url, 'https://www.tikwm.com/video/sd.mp4');
-    assert.equal(result.audio?.url, 'https://www.tikwm.com/music.mp3');
-    assert.equal(result.cover?.url, 'https://www.tikwm.com/cover.jpg');
+    assert.equal(result.sd?.url, 'https://api.tikwm.test/video/sd.mp4');
+    assert.equal(result.audio?.url, 'https://api.tikwm.test/music.mp3');
+    assert.equal(result.cover?.url, 'https://api.tikwm.test/cover.jpg');
+  });
+
+  it('falls back to direct TikTok VideoObject when live tikwm.com returns 502', async () => {
+    const provider = createTikWmProvider({
+      apiUrl: 'https://www.tikwm.com/api/',
+      userAgent: 'test',
+      fetcher: async (targetUrl) => {
+        if (targetUrl.includes('tikwm.com')) {
+          return new Response('Bad gateway', { status: 502 });
+        }
+        const videoObject = {
+          '@context': 'https://schema.org/',
+          '@type': 'VideoObject',
+          url: 'https://www.tiktok.com/@user/video/1',
+          name: 'Direct fallback title #test',
+          description: 'User (@user). original sound - User. Direct fallback title #test',
+          thumbnailUrl: ['https://www.tiktok.com/api/img/?itemId=1'],
+          contentUrl: 'https://www.tiktok.com/api/video/?itemId=1',
+          duration: 'PT15S',
+          creator: { name: 'User Name', alternateName: 'user' },
+          interactionStatistic: [
+            { interactionType: { '@type': 'http://schema.org/WatchAction' }, userInteractionCount: 1200 },
+            { interactionType: { '@type': 'http://schema.org/LikeAction' }, userInteractionCount: 340 },
+          ],
+        };
+        return new Response(
+          `<!doctype html><script type="application/ld+json" id="VideoObject">${JSON.stringify(videoObject)}</script>`,
+          { status: 200, headers: { 'Content-Type': 'text/html' } },
+        );
+      },
+    });
+
+    const result = await provider.resolve(link, signal);
+    assert.equal(result.id, '1');
+    assert.equal(result.title, 'Direct fallback title #test');
+    assert.equal(result.authorName, 'User Name');
+    assert.equal(result.authorHandle, '@user');
+    assert.equal(result.duration, 15);
+    assert.equal(result.likeCount, 340);
+    assert.equal(result.viewCount, 1200);
+    assert.equal(result.hd?.url, 'https://www.tiktok.com/api/video/?itemId=1');
+    assert.equal(result.cover?.url, 'https://www.tiktok.com/api/img/?itemId=1');
   });
 
   it('ignores protocol-relative and non-http urls', async () => {

@@ -19,7 +19,7 @@ try {
 }
 
 const version = getVersion();
-const userAgent = `Mozilla/5.0 (compatible; Wittens/${version})`;
+const userAgent = `Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html; Wittens/${version})`;
 
 if (config.webDistPath && !existsSync(path.join(config.webDistPath, 'index.html'))) {
   log.error(`WEB_DIST_PATH has no index.html: ${config.webDistPath}. Did you run "pnpm build"?`);
