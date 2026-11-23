@@ -1,32 +1,17 @@
+
 {
   "name": "api",
-  "description": "wittens processing api",
   "version": "1.0.0",
-  "type": "module",
-  "license": "MIT",
   "private": true,
-  "engines": {
-    "node": ">=20.11 <23"
-  },
-  "main": "dist/wittens.js",
   "scripts": {
-    "dev": "tsx watch src/wittens.ts",
     "build": "tsc -p tsconfig.build.json",
+    "dev": "tsx src/wittens.ts",
     "start": "node dist/wittens.js",
-    "lint": "tsc --noEmit -p tsconfig.json",
-    "test": "tsx --test test/*.test.ts"
+    "lint": "tsc --noEmit",
+    "test": "node --test"
   },
-  "dependencies": {
-    "@types/express": "^4.17.21",
-    "@types/node": "^22.14.0",
-    "dotenv": "^17.2.3",
-    "express": "^4.22.1",
-    "express-rate-limit": "^8.3.2",
-    "tsx": "^4.21.0",
+  "devDependencies": {
     "typescript": "^5.9.3",
-    "undici": "^6.24.1"
-  },
-  "files": [
-    "dist"
-  ]
+    "tsx": "^4.21.0"
+  }
 }
