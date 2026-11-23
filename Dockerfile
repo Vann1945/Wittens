@@ -12,7 +12,7 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile
 
 RUN pnpm build
-RUN pnpm --filter @wittens/api deploy --legacy --prod /prod/api
+RUN pnpm --filter api deploy --legacy --prod /prod/api
 
 # ---- runtime: one small image that serves the api and the built web app ----
 FROM node:22-alpine AS runtime
