@@ -1,0 +1,24 @@
+# OS
+.DS_Store
+desktop.ini
+
+# node
+node_modules
+*.log
+
+# build output
+dist
+build
+coverage
+
+# secrets
+.env
+.env.*
+!.env.example
+
+# docker
+docker-compose.yml
+
+# ide
+.vscode
+.idea
