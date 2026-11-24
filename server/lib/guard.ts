@@ -2,11 +2,10 @@ import dns from 'node:dns';
 import net from 'node:net';
 
 /**
- * SSRF guard. Every upstream media URL comes from a third party, so before we
- * connect to it we make sure it can't point at loopback, private networks,
- * link-local ranges (cloud metadata!) or other non-public addresses.
+ * Network safety guard for outbound requests.
+ * Blocks loopback, private networks, link-local ranges, cloud metadata endpoints,
+ * and other non-public IP addresses before and during DNS resolution.
  */
-
 function createBlockList(): net.BlockList {
   const list = new net.BlockList();
   const v4: Array<[string, number]> = [
@@ -27,17 +26,15 @@ function createBlockList(): net.BlockList {
   ];
   for (const [address, prefix] of v4) list.addSubnet(address, prefix, 'ipv4');
 
-  // IPv4-mapped IPv6 (::ffff:a.b.c.d) is matched by the IPv4 rules above: Node maps
-  // both ways, so a ::ffff:0:0/96 rule would wrongly block every IPv4 address.
   const v6: Array<[string, number]> = [
     ['::', 128],
     ['::1', 128],
-    ['64:ff9b::', 96], // NAT64
-    ['100::', 64], // discard-only
-    ['2001:db8::', 32], // documentation
-    ['fc00::', 7], // unique local
-    ['fe80::', 10], // link-local
-    ['ff00::', 8], // multicast
+    ['64:ff9b::', 96],
+    ['100::', 64],
+    ['2001:db8::', 32],
+    ['fc00::', 7],
+    ['fe80::', 10],
+    ['ff00::', 8],
   ];
   for (const [address, prefix] of v6) list.addSubnet(address, prefix, 'ipv6');
   return list;
@@ -53,7 +50,7 @@ export function isPublicAddress(address: string): boolean {
 
 const ALLOWED_PORTS = new Set(['', '80', '443']);
 
-/** Throws when a URL must not be fetched. Hostnames are additionally checked at connect time. */
+/** Validates that a URL points only to a standard public HTTP(S) destination. */
 export function assertSafeMediaUrl(url: URL): void {
   if (url.protocol !== 'https:' && url.protocol !== 'http:') {
     throw new Error('unsupported protocol');
@@ -69,16 +66,14 @@ export function assertSafeMediaUrl(url: URL): void {
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) {
     throw new Error('blocked host');
   }
-  // IP literals never trigger a DNS lookup, so they have to be checked here.
   if (net.isIP(host) !== 0 && !isPublicAddress(host)) {
     throw new Error('blocked address');
   }
 }
 
 /**
- * Drop-in `lookup` for undici's `connect` option. Resolves the hostname and
- * refuses to connect if ANY returned address is non-public, which also closes
- * the DNS-rebinding window between "check" and "connect".
+ * Custom DNS lookup for undici's `connect` option.
+ * Rejects connections if any resolved IP address is non-public.
  */
 export const guardedLookup = ((
   hostname: string,

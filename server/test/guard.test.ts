@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { assertSafeMediaUrl, isPublicAddress } from '../src/security/guard.js';
+import { assertSafeMediaUrl, isPublicAddress } from '../lib/guard.ts';
 
 describe('isPublicAddress', () => {
   it('blocks loopback, private, link-local and metadata addresses', () => {

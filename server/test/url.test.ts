@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { createFilename } from '../src/processing/filename.js';
-import { extractUrl, parseLink } from '../src/processing/url.js';
+import { extractUrl, parseLink } from '../lib/url.ts';
 
 describe('parseLink', () => {
-  it('accepts the usual TikTok hosts and normalizes to https', () => {
+  it('accepts standard TikTok hosts and normalizes to https', () => {
     for (const raw of [
       'https://www.tiktok.com/@user/video/123',
       'http://tiktok.com/@user/video/123',
@@ -44,20 +43,13 @@ describe('parseLink', () => {
 
 describe('extractUrl', () => {
   it('strips trailing punctuation', () => {
-    assert.equal(extractUrl('see https://www.tiktok.com/@a/video/1!'), 'https://www.tiktok.com/@a/video/1');
+    assert.equal(
+      extractUrl('see https://www.tiktok.com/@a/video/1!'),
+      'https://www.tiktok.com/@a/video/1',
+    );
   });
+
   it('returns null when there is no TikTok link', () => {
     assert.equal(extractUrl('https://example.com/x'), null);
-  });
-});
-
-describe('createFilename', () => {
-  it('keeps only safe characters', () => {
-    assert.equal(createFilename('user_123', 'mp4'), 'user_123.mp4');
-    assert.equal(createFilename('../../etc/passwd"\r\n', 'mp4'), 'etc_passwd.mp4');
-  });
-  it('falls back and truncates', () => {
-    assert.equal(createFilename('###', 'mp3'), 'tiktok_video.mp3');
-    assert.ok(createFilename('a'.repeat(200), 'mp4').length <= 48 + 4);
   });
 });

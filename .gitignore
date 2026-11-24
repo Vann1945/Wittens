@@ -2,23 +2,24 @@
 .DS_Store
 desktop.ini
 
-# node
+# Node
 node_modules
 *.log
 
-# build output
+# Build output
 dist
 build
 coverage
 
-# secrets
+# Secrets
 .env
 .env.*
 !.env.example
 
-# docker
+# Docker
 docker-compose.yml
 
-# ide
+# Tooling & IDE
+.playwright-cli
 .vscode
 .idea

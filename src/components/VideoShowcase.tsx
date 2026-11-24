@@ -366,7 +366,7 @@ export function VideoShowcase({
     const currentIndex = PLAYBACK_SPEEDS.indexOf(
       playbackSpeed as (typeof PLAYBACK_SPEEDS)[number],
     );
-    const nextSpeed = PLAYBACK_SPEEDS[(currentIndex + 1) % PLAYBACK_SPEEDS.length];
+    const nextSpeed = PLAYBACK_SPEEDS[(currentIndex + 1) % PLAYBACK_SPEEDS.length] ?? 1;
     setPlaybackSpeed(nextSpeed);
     if (videoRef.current) {
       videoRef.current.playbackRate = nextSpeed;

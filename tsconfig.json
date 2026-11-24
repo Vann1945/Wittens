@@ -4,9 +4,10 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "types": ["vite/client"],
+    "types": ["node", "vite/client"],
     "jsx": "react-jsx",
     "strict": true,
+    "noUncheckedIndexedAccess": true,
     "noUnusedLocals": true,
     "noFallthroughCasesInSwitch": true,
     "isolatedModules": true,
@@ -15,5 +16,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "server", "server.ts", "vite.config.ts"]
 }

@@ -1,6 +1,6 @@
 /**
- * Tiny logger. By design it never receives user links or media URLs:
- * wittens only logs lifecycle events and error kinds.
+ * Privacy-first structured logger. Never logs user URLs or media tokens;
+ * records only lifecycle events and error types.
  */
 const stamp = () => new Date().toISOString();
 

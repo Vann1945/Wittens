@@ -19,8 +19,8 @@ export interface ParsedLink {
 }
 
 /**
- * Validates user input and identifies the service it belongs to.
- * Returns null for anything that is not a plain http(s) TikTok link.
+ * Validates user input and normalizes TikTok links to clean HTTPS URLs.
+ * Returns null for anything that is not a valid TikTok http(s) URL.
  */
 export function parseLink(raw: string): ParsedLink | null {
   const candidate = raw.trim();
