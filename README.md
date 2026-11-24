@@ -135,7 +135,4 @@ Contributions are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, it exp
 
 ## acknowledgments
 
-- [cobalt](https://github.com/imputnet/cobalt) by imput. wittens' project structure and request flow (validate, match, resolve, tunnel) are inspired by it. No cobalt code or assets are used.
-- [TikWM](https://www.tikwm.com) for the upstream resolver.
-- [Express](https://expressjs.com), [undici](https://undici.nodejs.org), [express-rate-limit](https://github.com/express-rate-limit/express-rate-limit) and [dotenv](https://github.com/motdotla/dotenv) on the server.
 - [React](https://react.dev), [Vite](https://vite.dev), [Tailwind CSS](https://tailwindcss.com), [Lenis](https://lenis.darkroom.engineering), [Lucide](https://lucide.dev) and [Plus Jakarta Sans](https://fonts.google.com/specimen/Plus+Jakarta+Sans) on the client.
