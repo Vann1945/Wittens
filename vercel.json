@@ -1,6 +1,6 @@
 {
-  "buildCommand": "pnpm --filter web build",
+  "buildCommand": "pnpm --filter web build && rm -rf dist && cp -R web/dist dist",
   "installCommand": "pnpm install --frozen-lockfile",
-  "outputDirectory": "web/dist",
+  "outputDirectory": "dist",
   "framework": null
 }
