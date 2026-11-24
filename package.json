@@ -3,17 +3,20 @@
   "private": true,
   "description": "Paste a TikTok link, get the file, move on.",
   "license": "MIT",
-  "packageManager": "pnpm@10.28.0",
   "engines": {
     "node": ">=20.11 <23"
   },
+  "workspaces": [
+    "api",
+    "web"
+  ],
   "scripts": {
-    "build": "pnpm --filter web build && pnpm --filter server build",
-    "dev": "pnpm --filter web build && WEB_DIST_PATH=web/dist API_PORT=3000 API_LISTEN_ADDRESS=0.0.0.0 tsx server/src/wittens.ts",
-    "start": "WEB_DIST_PATH=web/dist API_PORT=3000 API_LISTEN_ADDRESS=0.0.0.0 node server/dist/wittens.js",
-    "lint": "pnpm --filter web lint && pnpm --filter server lint",
-    "test": "pnpm --filter server test",
-    "check": "pnpm run lint && pnpm run test && pnpm run build"
+    "build": "npm --prefix web run build && npm --prefix api run build",
+    "dev": "npm --prefix web run build && WEB_DIST_PATH=web/dist API_PORT=3000 API_LISTEN_ADDRESS=0.0.0.0 tsx api/src/wittens.ts",
+    "start": "WEB_DIST_PATH=web/dist API_PORT=3000 API_LISTEN_ADDRESS=0.0.0.0 node api/dist/wittens.js",
+    "lint": "npm --prefix web run lint && npm --prefix api run lint",
+    "test": "npm --prefix api run test",
+    "check": "npm run lint && npm run test && npm run build"
   },
   "devDependencies": {
     "tsx": "^4.21.0",

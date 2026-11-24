@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
+  ChevronLeft,
+  ChevronRight,
   Eye,
   Film,
   Heart,
+  Image as ImageIcon,
   Maximize,
   Minimize,
   Music,
@@ -13,10 +16,11 @@ import {
 } from 'lucide-react';
 import { DownloadTrayIcon } from './Icons';
 import { parseCaptionAndHashtags, truncateAtWord } from '../utils/caption';
-import type { ResolvedVideo } from '../types';
+import type { PhotoSlideItem, ResolvedVideo, VideoQualityOption } from '../types';
 
 export interface VideoShowcaseData {
   id: string;
+  type?: 'photo' | 'video';
   title: string;
   authorName: string;
   authorHandle: string;
@@ -25,6 +29,8 @@ export interface VideoShowcaseData {
   viewCount?: number | null;
   coverUrl: string | null;
   previewUrl?: string | null;
+  qualities?: VideoQualityOption[];
+  images?: PhotoSlideItem[];
   downloads: ResolvedVideo['downloads'];
 }
 
@@ -90,7 +96,9 @@ export function VideoShowcase({
   const [currentTime, setCurrentTime] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(video.duration || 0);
   const [isCaptionExpanded, setIsCaptionExpanded] = useState(false);
-  const [downloadFeedback, setDownloadFeedback] = useState<'video' | 'audio' | null>(null);
+  const [downloadFeedback, setDownloadFeedback] = useState<'video' | 'audio' | 'photo' | 'live' | null>(null);
+  const [selectedQualityIndex, setSelectedQualityIndex] = useState(0);
+  const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [shouldLoadPlayer, setShouldLoadPlayer] = useState(() => {
     if (!lazy) return true;
     return typeof HTMLMediaElement !== 'undefined'
@@ -151,16 +159,28 @@ export function VideoShowcase({
     setMediaDuration(video.duration || 0);
     setIsCaptionExpanded(false);
     setDownloadFeedback(null);
+    setSelectedQualityIndex(0);
+    setActiveSlideIndex(0);
     setIsPaused(prefersReducedMotion);
     setShowControls(prefersReducedMotion);
   }, [video.id, video.previewUrl, video.duration, prefersReducedMotion]);
+
+  const qualities = video.qualities ?? [];
+  const selectedQuality = qualities[selectedQualityIndex] ?? qualities[0] ?? null;
+  const activePreviewUrl = selectedQuality?.src ?? video.previewUrl ?? null;
+  const primaryDownloadUrl =
+    selectedQuality?.dl ?? video.downloads.hd?.url ?? video.downloads.sd?.url ?? null;
+
+  const images = video.images ?? [];
+  const isPhotoPost = video.type === 'photo' && images.length > 0;
+  const activeSlide = isPhotoPost ? images[Math.min(activeSlideIndex, images.length - 1)] : null;
 
   // Keep playbackRate synced to the active video element
   useEffect(() => {
     if (videoRef.current) {
       videoRef.current.playbackRate = playbackSpeed;
     }
-  }, [playbackSpeed, video.previewUrl, shouldLoadPlayer]);
+  }, [playbackSpeed, activePreviewUrl, shouldLoadPlayer]);
 
   // Listen to reduced-motion preference changes
   useEffect(() => {
@@ -214,7 +234,7 @@ export function VideoShowcase({
   // Autoplay with sound on when stream is ready and reduced-motion is not requested
   useEffect(() => {
     const el = videoRef.current;
-    if (!el || !shouldLoadPlayer || !video.previewUrl) return;
+    if (!el || !shouldLoadPlayer || !activePreviewUrl || isPhotoPost) return;
     el.muted = isMutedRef.current;
     el.playbackRate = playbackSpeedRef.current;
     if (prefersReducedMotion) {
@@ -231,11 +251,11 @@ export function VideoShowcase({
       setIsPaused(true);
       setShowControls(true);
     });
-  }, [video.previewUrl, shouldLoadPlayer, prefersReducedMotion]);
+  }, [activePreviewUrl, isPhotoPost, shouldLoadPlayer, prefersReducedMotion]);
 
   // Real-time clock overlay updates via requestAnimationFrame while playing
   useEffect(() => {
-    if (isPaused || !shouldLoadPlayer || !video.previewUrl) return;
+    if (isPaused || !shouldLoadPlayer || !activePreviewUrl || isPhotoPost) return;
     let rafId = 0;
 
     const syncClock = () => {
@@ -251,7 +271,7 @@ export function VideoShowcase({
     return () => {
       if (rafId) window.cancelAnimationFrame(rafId);
     };
-  }, [isPaused, shouldLoadPlayer, video.previewUrl]);
+  }, [isPaused, shouldLoadPlayer, activePreviewUrl, isPhotoPost]);
 
   function togglePlayPause() {
     const el = videoRef.current;
@@ -394,7 +414,7 @@ export function VideoShowcase({
     }
   }
 
-  function triggerDownloadNotice(kind: 'video' | 'audio') {
+  function triggerDownloadNotice(kind: 'video' | 'audio' | 'photo' | 'live') {
     setDownloadFeedback(kind);
     if (feedbackTimerRef.current !== null) {
       window.clearTimeout(feedbackTimerRef.current);
@@ -426,8 +446,6 @@ export function VideoShowcase({
     '--control-value': sliderValue,
   } as CSSProperties;
 
-  const primaryStream = video.downloads.hd ?? video.downloads.sd;
-
   const hasLikes = typeof video.likeCount === 'number' && video.likeCount >= 0;
   const hasViews = typeof video.viewCount === 'number' && video.viewCount >= 0;
 
@@ -439,12 +457,47 @@ export function VideoShowcase({
           ref={playerFrameRef}
           className="relative w-full overflow-hidden rounded-[28px] border border-white/15 bg-[#0B0B0C] aspect-[9/16] max-h-[660px]"
         >
-          {video.previewUrl && !videoFailed ? (
+          {isPhotoPost && activeSlide ? (
+            <>
+              <img
+                key={activeSlide.src}
+                src={activeSlide.src}
+                alt={`${video.title} — photo ${activeSlideIndex + 1} of ${images.length}`}
+                referrerPolicy="no-referrer"
+                className="h-full w-full bg-black object-contain"
+              />
+              <div className="pointer-events-none absolute top-3.5 left-3.5 rounded-full border border-white/12 bg-black/55 px-3 py-1 text-[12.5px] font-semibold tabular-nums text-white backdrop-blur-md select-none">
+                {activeSlideIndex + 1} / {images.length}
+              </div>
+              {images.length > 1 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setActiveSlideIndex((idx) => (idx - 1 + images.length) % images.length)
+                    }
+                    aria-label="Previous photo"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  >
+                    <ChevronLeft className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveSlideIndex((idx) => (idx + 1) % images.length)}
+                    aria-label="Next photo"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                  >
+                    <ChevronRight className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                </>
+              ) : null}
+            </>
+          ) : activePreviewUrl && !videoFailed ? (
             <>
               <video
                 ref={videoRef}
-                key={video.previewUrl}
-                src={shouldLoadPlayer ? video.previewUrl : undefined}
+                key={activePreviewUrl}
+                src={shouldLoadPlayer ? activePreviewUrl : undefined}
                 poster={shouldLoadPlayer ? (video.coverUrl ?? undefined) : undefined}
                 width={540}
                 height={960}
@@ -703,11 +756,72 @@ export function VideoShowcase({
           ) : null}
         </div>
 
-        {/* 3. Separate Download Card: Download stacked above MP3 (no file size shown) */}
+        {/* 3. Separate Download Card */}
         <div className="flex flex-col gap-2.5 rounded-[26px] border border-white/10 bg-[#141414] p-5">
-          {primaryStream ? (
+          {!isPhotoPost && qualities.length > 1 ? (
+            <div className="mb-1 flex flex-wrap gap-2" role="group" aria-label="Video quality">
+              {qualities.map((q, idx) => {
+                const resLabel = `${Math.min(q.width || 0, q.height || 0) || 'HD'}p`;
+                const codecLabel = q.hevc ? ' HEVC' : '';
+                const isSelected = idx === selectedQualityIndex;
+                return (
+                  <button
+                    key={`${q.dl}-${idx}`}
+                    type="button"
+                    onClick={() => {
+                      setSelectedQualityIndex(idx);
+                      setVideoFailed(false);
+                    }}
+                    aria-pressed={isSelected}
+                    className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold tabular-nums transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+                      isSelected
+                        ? 'bg-white text-[#0A0A0A]'
+                        : 'bg-[#242426] text-[#D1D1D6] hover:bg-[#313134] hover:text-white'
+                    }`}
+                  >
+                    {resLabel}
+                    {codecLabel}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+
+          {isPhotoPost && activeSlide ? (
+            <>
+              <a
+                href={activeSlide.dl}
+                download
+                onClick={() => triggerDownloadNotice('photo')}
+                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              >
+                <ImageIcon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                <span>
+                  {downloadFeedback === 'photo'
+                    ? 'Starting download...'
+                    : images.length > 1
+                      ? `Download Photo ${activeSlideIndex + 1}`
+                      : 'Download Photo'}
+                </span>
+              </a>
+
+              {activeSlide.live ? (
+                <a
+                  href={activeSlide.live.dl}
+                  download
+                  onClick={() => triggerDownloadNotice('live')}
+                  className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                >
+                  <Film className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  <span>
+                    {downloadFeedback === 'live' ? 'Starting Live Photo...' : 'Live Photo (MP4)'}
+                  </span>
+                </a>
+              ) : null}
+            </>
+          ) : primaryDownloadUrl ? (
             <a
-              href={primaryStream.url}
+              href={primaryDownloadUrl}
               download
               onClick={() => triggerDownloadNotice('video')}
               className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"

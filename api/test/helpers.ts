@@ -55,6 +55,7 @@ export async function startTestServer(options: {
   config?: Partial<Config>;
   provider?: Provider;
   mediaFetcher?: Fetcher;
+  tiktokFetcher?: import('../src/lib/tiktok.js').RawFetcher;
   now?: () => number;
 } = {}): Promise<TestServer> {
   const config = { ...baseConfig, ...options.config };
@@ -73,6 +74,7 @@ export async function startTestServer(options: {
       (async () => {
         throw new Error('unexpected media fetch');
       }),
+    tiktokFetcher: options.tiktokFetcher,
   });
 
   const server: Server = await new Promise((resolve) => {

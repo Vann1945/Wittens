@@ -4,7 +4,7 @@ import { loadConfig, loadEnvFile } from './config.js';
 import { createApp } from './core/api.js';
 import { log } from './misc/log.js';
 import { getVersion } from './misc/version.js';
-import { createTikWmProvider } from './processing/providers/tikwm.js';
+import { createTikTokDirectProvider } from './processing/providers/tiktok.js';
 import { createGuardedFetcher } from './stream/fetcher.js';
 import { TunnelStore } from './stream/store.js';
 
@@ -32,12 +32,7 @@ const tunnels = new TunnelStore({
   maxEntries: config.tunnelMaxEntries,
 });
 
-// The provider only ever talks to the configured API URL, so a plain fetch is enough.
-const provider = createTikWmProvider({
-  apiUrl: config.providerApiUrl,
-  fetcher: (url, init) => fetch(url, init),
-  userAgent,
-});
+const provider = createTikTokDirectProvider();
 
 const app = createApp({ config, version, provider, tunnels, mediaFetcher });
 

@@ -14,6 +14,8 @@ import { ApiError, errors } from '../processing/errors.js';
 import { match } from '../processing/match.js';
 import type { Provider } from '../processing/types.js';
 import type { Fetcher } from '../stream/fetcher.js';
+import { getInfo, HttpError, type RawFetcher } from '../lib/tiktok.js';
+import { handleDownload } from '../stream/dl.js';
 import { proxyTunnel, type TunnelMode } from '../stream/proxy.js';
 import type { TunnelStore } from '../stream/store.js';
 
@@ -24,6 +26,8 @@ export interface AppDependencies {
   tunnels: TunnelStore;
   /** Fetcher used for third-party media. Must be SSRF-guarded in production. */
   mediaFetcher: Fetcher;
+  /** Optional custom fetcher for /api/info and /api/dl (used in tests). */
+  tiktokFetcher?: RawFetcher;
 }
 
 function sendError(res: Response, error: ApiError): void {
@@ -54,7 +58,14 @@ const SECURITY_HEADERS: Record<string, string> = {
  * Builds the Express app. Everything it needs comes in through `deps`,
  * so tests can run it against fakes and the entrypoint stays trivial.
  */
-export function createApp({ config, version, provider, tunnels, mediaFetcher }: AppDependencies): Express {
+export function createApp({
+  config,
+  version,
+  provider,
+  tunnels,
+  mediaFetcher,
+  tiktokFetcher,
+}: AppDependencies): Express {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -159,6 +170,38 @@ export function createApp({ config, version, provider, tunnels, mediaFetcher }: 
         timeoutMs: config.upstreamTimeoutMs,
       });
     };
+
+  // GET /api/info?url=... -> direct TikTok SSR metadata & wrapped /api/dl URLs
+  app.get('/api/info', resolveLimiter, async (req: Request, res: Response) => {
+    const rawUrl = typeof req.query.url === 'string' ? req.query.url : '';
+    res.setHeader('Cache-Control', 'no-store');
+    try {
+      const info = await getInfo(rawUrl, {
+        signal: AbortSignal.timeout(config.upstreamTimeoutMs),
+        fetcher: tiktokFetcher,
+      });
+      res.status(200).json(info);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        res.status(error.status).json({
+          error: { code: error.code, message: error.message },
+        });
+        return;
+      }
+      log.error('[info]', error);
+      res.status(500).json({
+        error: { code: 'internal', message: 'Something went wrong on our side.' },
+      });
+    }
+  });
+
+  // GET /api/dl?t=<token>&n=<name>[&inline=1] -> streams TikTok CDN media with session cookies
+  app.get('/api/dl', tunnelLimiter, async (req: Request, res: Response) => {
+    await handleDownload(req, res, {
+      fetcher: tiktokFetcher,
+      timeoutMs: config.upstreamTimeoutMs,
+    });
+  });
 
   app.get('/api/stream/:token', tunnelLimiter, tunnelRoute('inline'));
   app.get('/api/tunnel/:token', tunnelLimiter, tunnelRoute('attachment'));
