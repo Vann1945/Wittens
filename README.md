@@ -1,3 +1,7 @@
+## Rust API
+
+A verified Rust port of the API is available in [`rust-api/`](rust-api/). It preserves the `/api`, `/api/resolve`, `/api/stream/:token`, and `/api/tunnel/:token` contract while using Axum, Tokio, and Reqwest. Build it with `cargo build --release`; see [`RUST_MIGRATION.md`](RUST_MIGRATION.md) and [`Dockerfile.rust`](Dockerfile.rust) for deployment.
+
 <div align="center">
   <img src="assets/banner.png" alt="wittens" width="720" />
 
