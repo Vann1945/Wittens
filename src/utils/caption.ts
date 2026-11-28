@@ -2,7 +2,8 @@ export function parseCaptionAndHashtags(raw: string): {
   caption: string;
   hashtags: string[];
 } {
-  const matches = raw.match(/#[\p{L}\p{N}_]+/gu) ?? [];
+  const safeRaw = typeof raw === 'string' ? raw : '';
+  const matches = safeRaw.match(/#[\p{L}\p{N}_]+/gu) ?? [];
   const seen = new Set<string>();
   const hashtags: string[] = [];
   for (const tag of matches) {
@@ -13,7 +14,7 @@ export function parseCaptionAndHashtags(raw: string): {
     }
   }
 
-  const caption = raw
+  const caption = safeRaw
     .replace(/#[\p{L}\p{N}_]+/gu, '')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/[ \t]+\n/g, '\n')

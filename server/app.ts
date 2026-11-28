@@ -1,20 +1,23 @@
 import express, {
   type ErrorRequestHandler,
   type Express,
+  type NextFunction,
   type Request,
   type RequestHandler,
   type Response,
 } from 'express';
 import rateLimit from 'express-rate-limit';
-import type { Config } from './config.ts';
-import { log } from './lib/log.ts';
 import type { RawFetcher } from './lib/tiktok.ts';
-import { handleDownload } from './routes/download.ts';
+import { handleDownload } from './routes/dl.ts';
 import { handleInfo } from './routes/info.ts';
 
-export interface AppDependencies {
-  config: Config;
-  version: string;
+export interface AppOptions {
+  isProd?: boolean;
+  version?: string;
+  upstreamTimeoutMs?: number;
+  infoRateLimitMax?: number;
+  downloadRateLimitMax?: number;
+  rateLimitWindowMs?: number;
   /** Optional custom fetcher for /api/info and /api/dl (used in tests). */
   tiktokFetcher?: RawFetcher;
 }
@@ -43,22 +46,29 @@ function buildSecurityHeaders(isProd: boolean): Record<string, string> {
 
 export const errorHandler: ErrorRequestHandler = (error, _req, res, next) => {
   if (res.headersSent) return next(error);
-  log.error('unhandled error', error);
+  console.error('[server]', error);
   res.status(500).json({
-    error: { code: 'internal', message: 'Something went wrong on our side.' },
+    error: { code: 'internal', message: 'Something went wrong on the server.' },
   });
 };
 
 /**
- * Builds the Express API app. Everything it needs comes through `deps`
- * so tests can inject fake fetchers without touching the network.
+ * Builds the Express API app with zero .env configuration required.
  */
-export function createApp({ config, version, tiktokFetcher }: AppDependencies): Express {
+export function createApp({
+  isProd = false,
+  version = '1.0.0',
+  upstreamTimeoutMs = 15_000,
+  infoRateLimitMax = 30,
+  downloadRateLimitMax = 120,
+  rateLimitWindowMs = 60_000,
+  tiktokFetcher,
+}: AppOptions = {}): Express {
   const app = express();
   app.disable('x-powered-by');
-  app.set('trust proxy', config.trustProxy);
+  app.set('trust proxy', 1);
 
-  const securityHeaders = buildSecurityHeaders(config.isProd);
+  const securityHeaders = buildSecurityHeaders(isProd);
   app.use((_req, res, next) => {
     for (const [name, value] of Object.entries(securityHeaders)) {
       res.setHeader(name, value);
@@ -66,35 +76,18 @@ export function createApp({ config, version, tiktokFetcher }: AppDependencies): 
     next();
   });
 
-  if (config.corsOrigin) {
-    const origin = config.corsOrigin;
-    app.use('/api', (req, res, next) => {
-      res.setHeader('Access-Control-Allow-Origin', origin);
-      if (origin !== '*') res.setHeader('Vary', 'Origin');
-      res.setHeader('Access-Control-Expose-Headers', 'Ratelimit, Ratelimit-Policy, Retry-After');
-      if (req.method === 'OPTIONS') {
-        res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        res.setHeader('Access-Control-Max-Age', '600');
-        res.status(204).end();
-        return;
-      }
-      next();
-    });
-  }
-
   const handleRateExceeded: RequestHandler = (_req, res) => {
     res.status(429).json({
       error: {
         code: 'rate_exceeded',
-        message: 'You are making too many requests. Please slow down a little.',
+        message: 'Too many requests. Please wait a moment and try again.',
       },
     });
   };
 
   const infoLimiter = rateLimit({
-    windowMs: config.rateLimitWindowMs,
-    limit: config.infoRateLimitMax,
+    windowMs: rateLimitWindowMs,
+    limit: infoRateLimitMax,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     validate: false,
@@ -102,39 +95,36 @@ export function createApp({ config, version, tiktokFetcher }: AppDependencies): 
   });
 
   const downloadLimiter = rateLimit({
-    windowMs: config.rateLimitWindowMs,
-    limit: config.downloadRateLimitMax,
+    windowMs: rateLimitWindowMs,
+    limit: downloadRateLimitMax,
     standardHeaders: 'draft-7',
     legacyHeaders: false,
     validate: false,
     handler: handleRateExceeded,
   });
 
-  // GET /api -> health check and instance info
+  // GET /api -> health check
   app.get('/api', (_req, res) => {
     res.json({
-      wittens: {
-        version,
-        provider: 'tiktok',
-        services: ['tiktok'],
-      },
+      ok: true,
+      version,
+      scraper: 'tiktok',
     });
   });
 
-  // GET /api/info?url=... -> TikTok metadata & signed /api/dl media URLs
-  app.get('/api/info', infoLimiter, async (req: Request, res: Response) => {
-    await handleInfo(req, res, {
-      timeoutMs: config.upstreamTimeoutMs,
+  // GET /api/info?url=... -> scrape TikTok post metadata and tokenized media links
+  app.get('/api/info', infoLimiter, (req: Request, res: Response, next: NextFunction) => {
+    void handleInfo(req, res, {
+      timeoutMs: upstreamTimeoutMs,
       fetcher: tiktokFetcher,
-    });
+    }).catch(next);
   });
 
-  // GET /api/dl?t=<token>&n=<name>[&inline=1] -> streams TikTok CDN media
-  app.get('/api/dl', downloadLimiter, async (req: Request, res: Response) => {
-    await handleDownload(req, res, {
+  // GET /api/dl?t=<token>&n=<name>[&inline=1] -> proxy media stream from TikTok CDN
+  app.get('/api/dl', downloadLimiter, (req: Request, res: Response, next: NextFunction) => {
+    void handleDownload(req, res, {
       fetcher: tiktokFetcher,
-      timeoutMs: config.upstreamTimeoutMs,
-    });
+    }).catch(next);
   });
 
   app.use('/api', (_req, res) => {

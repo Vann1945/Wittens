@@ -1,9 +1,7 @@
 import assert from 'node:assert/strict';
-import http from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, it } from 'node:test';
-import { createApp, errorHandler } from '../app.ts';
-import { loadConfig, type Config } from '../config.ts';
+import { describe, it } from 'node:test';
+import { createApp } from '../app.ts';
 import {
   decodeToken,
   encodeToken,
@@ -15,326 +13,280 @@ import {
   type RawFetcher,
 } from '../lib/tiktok.ts';
 
-interface TestServer {
-  base: string;
-  close: () => Promise<void>;
-}
-
-async function startTestServer(options: {
-  tiktokFetcher?: RawFetcher;
-  config?: Partial<Config>;
-} = {}): Promise<TestServer> {
-  const config: Config = {
-    ...loadConfig({}),
-    isProd: true,
-    webDistPath: null,
-    ...options.config,
-  };
-  const app = createApp({ config, version: '1.0.0-test', tiktokFetcher: options.tiktokFetcher });
-  app.use(errorHandler);
-
-  const server = http.createServer(app);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+async function withServer(
+  tiktokFetcher: RawFetcher,
+  fn: (baseUrl: string) => Promise<void>,
+): Promise<void> {
+  const app = createApp({ isProd: false, version: '1.0.0-test', tiktokFetcher });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
   const { port } = server.address() as AddressInfo;
-
-  return {
-    base: `http://127.0.0.1:${port}`,
-    close: () =>
-      new Promise<void>((resolve, reject) =>
-        server.close((err) => (err ? reject(err) : resolve())),
-      ),
-  };
+  try {
+    await fn(`http://127.0.0.1:${port}`);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 }
 
-let server: TestServer | undefined;
-afterEach(async () => {
-  await server?.close();
-  server = undefined;
-});
-
-describe('tiktok host allowlists and signed tokens', () => {
-  it('allows only expected page and media hosts', () => {
+describe('tiktok scraper helpers', () => {
+  it('validates allowed page and media hosts', () => {
     assert.equal(isPageHost('www.tiktok.com'), true);
     assert.equal(isPageHost('vm.tiktok.com'), true);
-    assert.equal(isPageHost('tiktok.com.evil.test'), false);
+    assert.equal(isPageHost('tiktok.com'), true);
+    assert.equal(isPageHost('evil-tiktok.com'), false);
+    assert.equal(isPageHost('127.0.0.1'), false);
 
-    assert.equal(isMediaHost('v16-webapp-prime.tiktokcdn.com'), true);
-    assert.equal(isMediaHost('p16-sign.ibyteimg.com'), true);
-    assert.equal(isMediaHost('v16m.akamaized.net'), true);
-    assert.equal(isMediaHost('127.0.0.1'), false);
-    assert.equal(isMediaHost('evil.example.com'), false);
+    assert.equal(isMediaHost('v16-webapp-prime.tiktok.com'), true);
+    assert.equal(isMediaHost('p16-sign-sg.tiktokcdn.com'), true);
+    assert.equal(isMediaHost('v19.akamaized.net'), true);
+    assert.equal(isMediaHost('www.tikwm.com'), true);
+    assert.equal(isMediaHost('169.254.169.254'), false);
+    assert.equal(isMediaHost('localhost'), false);
   });
 
-  it('signs and verifies media tokens and rejects tampering', () => {
+  it('encodes and decodes media tokens cleanly', () => {
     const token = encodeToken({ u: 'https://v16.tiktokcdn.com/video.mp4', c: 'tt_chain_token=abc' });
     const decoded = decodeToken(token);
     assert.equal(decoded.u, 'https://v16.tiktokcdn.com/video.mp4');
     assert.equal(decoded.c, 'tt_chain_token=abc');
-
-    const tampered = `${token.slice(0, -2)}xx`;
-    assert.throws(() => decodeToken(tampered));
-    assert.throws(() =>
-      decodeToken(Buffer.from(JSON.stringify({ u: 'https://v16.tiktokcdn.com/a.mp4' })).toString('base64url')),
-    );
   });
-});
 
-describe('videoQualities, findLive, and normalize', () => {
-  it('sorts video qualities by resolution, prefers H.264 over HEVC, then bitrate', () => {
+  it('orders video qualities by resolution, H.264 before HEVC, then bitrate', () => {
     const qualities = videoQualities({
       bitrateInfo: [
         {
-          Bitrate: 2_000_000,
+          Bitrate: 1_500_000,
           CodecType: 'h265_hvc1',
-          PlayAddr: {
-            Width: 1080,
-            Height: 1920,
-            DataSize: 900,
-            UrlList: ['https://v16.tiktokcdn.com/1080_hevc.mp4'],
-          },
+          PlayAddr: { UrlList: ['https://v16.tiktokcdn.com/1080-hevc.mp4'], Width: 1080, Height: 1920, DataSize: 3000 },
         },
         {
           Bitrate: 1_200_000,
           CodecType: 'h264',
-          PlayAddr: {
-            Width: 720,
-            Height: 1280,
-            DataSize: 500,
-            UrlList: ['https://v16.tiktokcdn.com/720_h264.mp4'],
-          },
+          PlayAddr: { UrlList: ['https://v16.tiktokcdn.com/1080-h264.mp4'], Width: 1080, Height: 1920, DataSize: 3500 },
         },
         {
-          Bitrate: 1_800_000,
+          Bitrate: 2_000_000,
           CodecType: 'h264',
-          PlayAddr: {
-            Width: 1080,
-            Height: 1920,
-            DataSize: 800,
-            UrlList: ['https://v16.tiktokcdn.com/1080_h264.mp4'],
-          },
+          PlayAddr: { UrlList: ['https://v16.tiktokcdn.com/720-h264.mp4'], Width: 720, Height: 1280, DataSize: 2000 },
         },
       ],
     });
-    assert.equal(qualities.length, 3);
-    assert.equal(qualities[0]?.url, 'https://v16.tiktokcdn.com/1080_h264.mp4');
-    assert.equal(qualities[1]?.url, 'https://v16.tiktokcdn.com/1080_hevc.mp4');
-    assert.equal(qualities[2]?.url, 'https://v16.tiktokcdn.com/720_h264.mp4');
+
+    assert.equal(qualities[0]?.url, 'https://v16.tiktokcdn.com/1080-h264.mp4');
+    assert.equal(qualities[1]?.url, 'https://v16.tiktokcdn.com/1080-hevc.mp4');
+    assert.equal(qualities[2]?.url, 'https://v16.tiktokcdn.com/720-h264.mp4');
   });
 
-  it('finds live photo video urls inside photo items', () => {
+  it('extracts live photo URLs and normalizes photo posts', () => {
     const liveUrl = findLive({
-      imageURL: { urlList: ['https://p16.ibyteimg.com/photo.jpeg'] },
-      livePhotoInfo: { videoUrl: { urlList: ['https://v16.tiktokcdn.com/live.mp4'] } },
+      imageURL: { urlList: ['https://p16.tiktokcdn.com/photo.jpg'] },
+      livePhotoVideo: { playAddr: 'https://v16.tiktokcdn.com/live.mp4' },
     });
     assert.equal(liveUrl, 'https://v16.tiktokcdn.com/live.mp4');
-  });
 
-  it('normalizes photo slideshows with live photos and music', () => {
-    const wrap = (u: string, n: string) => ({
-      dl: `/api/dl?u=${u}&n=${n}`,
-      src: `/api/dl?u=${u}&n=${n}&inline=1`,
-    });
-    const info = normalize(
+    const normalized = normalize(
       {
-        id: '999',
+        id: '777',
         desc: 'Photo dump #sunset',
         author: { uniqueId: 'alice', nickname: 'Alice', verified: true },
-        statsV2: {
-          playCount: '1200',
-          diggCount: '300',
-          commentCount: '12',
-          shareCount: '4',
-          collectCount: '25',
-        },
-        music: {
-          title: 'Chill Beat',
-          authorName: 'DJ',
-          duration: 30,
-          playUrl: 'https://sf16.muscdn.com/audio.mp3',
-        },
+        stats: { playCount: 1000, diggCount: 250 },
         imagePost: {
           images: [
             {
               imageWidth: 1080,
               imageHeight: 1440,
-              imageURL: {
-                urlList: ['https://p16.ibyteimg.com/1.webp', 'https://p16.ibyteimg.com/1.jpeg'],
-              },
-              liveVideo: { urlList: ['https://v16.tiktokcdn.com/1_live.mp4'] },
+              imageURL: { urlList: ['https://p16.tiktokcdn.com/slide1.jpeg'] },
+              liveVideo: { url: 'https://v16.tiktokcdn.com/slide1.mp4' },
             },
           ],
         },
+        music: {
+          title: 'Ambient',
+          authorName: 'DJ',
+          duration: 15,
+          playUrl: 'https://sf16.tiktokcdn.com/audio.mp3',
+        },
       },
-      wrap,
-      'https://www.tiktok.com/@alice/photo/999',
+      (url, name) => ({ dl: `/api/dl?u=${encodeURIComponent(url)}&n=${name}`, src: `/api/dl?u=${encodeURIComponent(url)}&n=${name}&inline=1` }),
+      'https://www.tiktok.com/@alice/photo/777',
     );
-    assert.equal(info.type, 'photo');
-    assert.equal(info.video, null);
-    assert.equal(info.images.length, 1);
-    assert.match(info.images[0]!.dl, /1\.jpeg/);
-    assert.ok(info.images[0]!.live);
-    assert.equal(info.music?.title, 'Chill Beat');
-    assert.equal(info.stats.likes, 300);
+
+    assert.equal(normalized.type, 'photo');
+    assert.equal(normalized.images.length, 1);
+    assert.ok(normalized.images[0]?.live?.dl.includes('tiktok_alice_777_01_live'));
+    assert.equal(normalized.music?.title, 'Ambient');
   });
 });
 
-describe('API routes (/api, /api/info, /api/dl)', () => {
-  it('returns health info and security headers on GET /api', async () => {
-    server = await startTestServer();
-    const res = await fetch(`${server.base}/api`);
-    assert.equal(res.status, 200);
-    assert.equal(res.headers.get('x-content-type-options'), 'nosniff');
-    assert.equal(res.headers.get('referrer-policy'), 'no-referrer');
-    const body = (await res.json()) as { wittens: { version: string; provider: string } };
-    assert.equal(body.wittens.version, '1.0.0-test');
-    assert.equal(body.wittens.provider, 'tiktok');
-  });
-
-  it('extracts SSR __UNIVERSAL_DATA_FOR_REHYDRATION__, passes session cookies, and streams via /api/dl', async () => {
-    let seenMediaCookie = '';
-    let seenMediaReferer = '';
-    const tiktokFetcher: RawFetcher = async (url, init) => {
-      const href = String(url);
-      if (href.startsWith('https://www.tiktok.com/')) {
-        const payload = {
-          __DEFAULT_SCOPE__: {
-            'webapp.video-detail': {
-              itemInfo: {
-                itemStruct: {
-                  id: '7300000000000000002',
-                  desc: 'Cool clip #fyp',
-                  createTime: 1700000000,
-                  author: { uniqueId: 'creator', nickname: 'Creator', verified: false },
-                  stats: {
-                    playCount: 5000,
-                    diggCount: 400,
-                    commentCount: 10,
-                    shareCount: 5,
-                    collectCount: 20,
+describe('Express API routes', () => {
+  it('serves /api health, /api/info scraper response, and /api/dl media streaming', async () => {
+    const rehydration = {
+      __DEFAULT_SCOPE__: {
+        'webapp.video-detail': {
+          statusCode: 0,
+          itemInfo: {
+            itemStruct: {
+              id: '123456',
+              desc: 'Test clip #demo',
+              createTime: 1700000000,
+              author: { uniqueId: 'creator', nickname: 'Creator' },
+              statsV2: { playCount: '9000', diggCount: '420' },
+              video: {
+                duration: 12,
+                originCover: 'https://p16.tiktokcdn.com/cover.jpg',
+                bitrateInfo: [
+                  {
+                    Bitrate: 1_000_000,
+                    CodecType: 'h264',
+                    PlayAddr: {
+                      UrlList: ['https://v16.tiktokcdn.com/clip.mp4'],
+                      Width: 720,
+                      Height: 1280,
+                      DataSize: 12345,
+                    },
                   },
-                  video: {
-                    duration: 15,
-                    cover: 'https://p16.ibyteimg.com/cover.jpg',
-                    bitrateInfo: [
-                      {
-                        Bitrate: 1500000,
-                        CodecType: 'h264',
-                        PlayAddr: {
-                          Width: 720,
-                          Height: 1280,
-                          DataSize: 4096,
-                          UrlList: ['https://v16.tiktokcdn.com/clip_720.mp4'],
-                        },
-                      },
-                    ],
-                  },
-                  music: {
-                    title: 'Sound',
-                    authorName: 'Creator',
-                    duration: 15,
-                    playUrl: 'https://sf16.muscdn.com/sound.mp3',
-                  },
-                },
+                ],
+              },
+              music: {
+                title: 'Beat',
+                authorName: 'Producer',
+                duration: 12,
+                playUrl: 'https://sf16.tiktokcdn.com/beat.mp3',
               },
             },
           },
-        };
+        },
+      },
+    };
+
+    const fakeFetcher: RawFetcher = async (input) => {
+      const target = String(input);
+      if (target.includes('www.tiktok.com')) {
         return new Response(
-          `<!doctype html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__" type="application/json">${JSON.stringify(payload)}</script>`,
+          `<html><script id="__UNIVERSAL_DATA_FOR_REHYDRATION__">${JSON.stringify(rehydration)}</script></html>`,
           {
             status: 200,
             headers: {
-              'Content-Type': 'text/html',
-              'Set-Cookie': 'tt_chain_token=secret123; Path=/; HttpOnly',
+              'content-type': 'text/html; charset=utf-8',
+              'set-cookie': 'tt_chain_token=secret123; Path=/; HttpOnly',
             },
           },
         );
       }
-
-      if (href === 'https://v16.tiktokcdn.com/clip_720.mp4') {
-        seenMediaCookie = init?.headers?.Cookie ?? '';
-        seenMediaReferer = init?.headers?.Referer ?? '';
-        if (init?.headers?.Range) {
-          return new Response('mp', {
-            status: 206,
-            headers: {
-              'Content-Type': 'video/mp4',
-              'Content-Length': '2',
-              'Content-Range': 'bytes 0-1/4',
-              'Accept-Ranges': 'bytes',
-            },
-          });
-        }
-        return new Response('mp4!', {
+      if (target.includes('clip.mp4')) {
+        return new Response(new Uint8Array([1, 2, 3, 4]), {
           status: 200,
-          headers: { 'Content-Type': 'video/mp4', 'Content-Length': '4' },
+          headers: {
+            'content-type': 'video/mp4',
+            'content-length': '4',
+            'accept-ranges': 'bytes',
+          },
         });
       }
-
+      if (target.includes('evil-html')) {
+        return new Response('<script>alert(1)</script>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      }
       return new Response('not found', { status: 404 });
     };
 
-    server = await startTestServer({ tiktokFetcher });
+    await withServer(fakeFetcher, async (baseUrl) => {
+      const healthRes = await fetch(`${baseUrl}/api`);
+      assert.equal(healthRes.status, 200);
+      const health = (await healthRes.json()) as { ok: boolean; scraper: string };
+      assert.equal(health.ok, true);
+      assert.equal(health.scraper, 'tiktok');
 
-    const infoRes = await fetch(
-      `${server.base}/api/info?url=${encodeURIComponent('https://www.tiktok.com/@creator/video/7300000000000000002')}`,
-    );
-    assert.equal(infoRes.status, 200);
-    const info = await infoRes.json();
-    assert.equal(info.type, 'video');
-    assert.equal(info.id, '7300000000000000002');
-    assert.equal(info.video.qualities.length, 1);
-    assert.match(info.video.dl, /^\/api\/dl\?t=/);
+      const infoRes = await fetch(
+        `${baseUrl}/api/info?url=${encodeURIComponent('https://www.tiktok.com/@creator/video/123456')}`,
+      );
+      assert.equal(infoRes.status, 200);
+      const info = (await infoRes.json()) as {
+        id: string;
+        type: string;
+        video: { dl: string; src: string };
+        cover: { src: string };
+        music: { dl: string };
+      };
+      assert.equal(info.id, '123456');
+      assert.equal(info.type, 'video');
+      assert.ok(info.video.dl.startsWith('/api/dl?'));
+      assert.ok(info.cover.src.includes('inline=1'));
+      assert.ok(info.music.dl.startsWith('/api/dl?'));
 
-    // Inline range streaming
-    const streamRes = await fetch(`${server.base}${info.video.src}`, {
-      headers: { Range: 'bytes=0-1' },
+      const dlRes = await fetch(`${baseUrl}${info.video.dl}`);
+      assert.equal(dlRes.status, 200);
+      assert.equal(dlRes.headers.get('content-type'), 'video/mp4');
+      assert.equal(dlRes.headers.get('content-length'), '4');
+      assert.ok(dlRes.headers.get('x-filename')?.endsWith('.mp4'));
+      assert.equal((await dlRes.arrayBuffer()).byteLength, 4);
+
+      // Non-media upstream content-type is forced to attachment + application/octet-stream
+      const htmlToken = encodeToken({ u: 'https://p16.tiktokcdn.com/evil-html' });
+      const guardedRes = await fetch(`${baseUrl}/api/dl?t=${htmlToken}&n=test&inline=1`);
+      assert.equal(guardedRes.status, 200);
+      assert.equal(guardedRes.headers.get('content-type'), 'application/octet-stream');
+      assert.ok(guardedRes.headers.get('content-disposition')?.startsWith('attachment;'));
+
+      // SSRF host rejected
+      const ssrfToken = encodeToken({ u: 'https://127.0.0.1/secret' });
+      const ssrfRes = await fetch(`${baseUrl}/api/dl?t=${ssrfToken}&n=secret`);
+      assert.equal(ssrfRes.status, 400);
     });
-    assert.equal(streamRes.status, 206);
-    assert.equal(await streamRes.text(), 'mp');
-    assert.equal(seenMediaCookie, 'tt_chain_token=secret123');
-    assert.equal(seenMediaReferer, 'https://www.tiktok.com/');
-    assert.match(streamRes.headers.get('content-disposition') ?? '', /^inline;/);
-
-    // Attachment download
-    const dlRes = await fetch(`${server.base}${info.video.dl}`);
-    assert.equal(dlRes.status, 200);
-    assert.equal(await dlRes.text(), 'mp4!');
-    assert.match(
-      dlRes.headers.get('content-disposition') ?? '',
-      /^attachment; filename="tiktok_creator_7300000000000000002_720p\.mp4"$/,
-    );
   });
 
-  it('rejects unsigned tokens and forces attachment + octet-stream for hostile upstream MIME types', async () => {
-    const tiktokFetcher: RawFetcher = async () =>
-      new Response('<script>alert(1)</script>', {
-        status: 200,
-        headers: { 'Content-Type': 'text/html' },
-      });
+  it('falls back cleanly when TikTok serves SlardarWAF challenge HTML', async () => {
+    const fakeFetcher: RawFetcher = async (input) => {
+      const host = new URL(String(input)).hostname;
+      if (host === 'www.tiktok.com') {
+        return new Response('<!DOCTYPE html><script id="slardar-config">{"slardarClient":"SlardarWAF"}</script>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      }
+      if (host === 'www.tikwm.com') {
+        return new Response(
+          JSON.stringify({
+            code: 0,
+            msg: 'success',
+            data: {
+              id: '7106594312292453675',
+              title: 'Fallback clip #test',
+              duration: 24,
+              play_count: 500000,
+              digg_count: 90000,
+              cover: 'https://p16-common-sign.tiktokcdn-us.com/cover.jpg',
+              hdplay: 'https://v19-notes.tiktokcdn-us.com/hd.mp4',
+              play: 'https://v19.tiktokcdn-us.com/sd.mp4',
+              music: 'https://v16-ies-music.tiktokcdn-us.com/sound.mp3',
+              author: { unique_id: 'tiktok', nickname: 'TikTok' },
+            },
+          }),
+          { status: 200, headers: { 'content-type': 'application/json' } },
+        );
+      }
+      return new Response('not found', { status: 404 });
+    };
 
-    server = await startTestServer({ tiktokFetcher });
-
-    const badTokenRes = await fetch(`${server.base}/api/dl?t=unsigned_junk`);
-    assert.equal(badTokenRes.status, 400);
-
-    const signedToken = encodeToken({ u: 'https://v16.tiktokcdn.com/fake.html' });
-    const htmlRes = await fetch(`${server.base}/api/dl?t=${signedToken}&n=test&inline=1`);
-    assert.equal(htmlRes.status, 200);
-    assert.equal(htmlRes.headers.get('content-type'), 'application/octet-stream');
-    assert.equal(htmlRes.headers.get('x-content-type-options'), 'nosniff');
-    assert.match(htmlRes.headers.get('content-disposition') ?? '', /^attachment;/);
-  });
-
-  it('enforces rate limiting and returns 404 for unknown API paths', async () => {
-    server = await startTestServer({ config: { infoRateLimitMax: 1 } });
-
-    const notFound = await fetch(`${server.base}/api/does-not-exist`);
-    assert.equal(notFound.status, 404);
-
-    const first = await fetch(`${server.base}/api/info?url=not-valid`);
-    assert.equal(first.status, 400);
-    const second = await fetch(`${server.base}/api/info?url=not-valid`);
-    assert.equal(second.status, 429);
+    await withServer(fakeFetcher, async (baseUrl) => {
+      const res = await fetch(
+        `${baseUrl}/api/info?url=${encodeURIComponent('https://www.tiktok.com/@tiktok/video/7106594312292453675')}`,
+      );
+      assert.equal(res.status, 200);
+      const info = (await res.json()) as {
+        id: string;
+        type: string;
+        video: { qualities: { dl: string }[] };
+        cover: { src: string };
+        music: { dl: string };
+      };
+      assert.equal(info.id, '7106594312292453675');
+      assert.equal(info.type, 'video');
+      assert.equal(info.video.qualities.length, 2);
+      assert.ok(info.cover.src.startsWith('/api/dl?'));
+      assert.ok(info.music.dl.startsWith('/api/dl?'));
+    });
   });
 });

@@ -2,8 +2,6 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import { createApp, errorHandler } from './server/app.ts';
-import { loadConfig, loadEnvFile } from './server/config.ts';
-import { log } from './server/lib/log.ts';
 
 function readPackageVersion(): string {
   try {
@@ -15,23 +13,27 @@ function readPackageVersion(): string {
   }
 }
 
+function detectProductionMode(): boolean {
+  if (process.env.NODE_ENV === 'production') return true;
+  if (process.env.NODE_ENV === 'development') return false;
+  const runningUnderTsx =
+    process.execArgv.some((arg) => arg.includes('tsx')) ||
+    process.argv.some((arg) => arg.includes('tsx'));
+  const hasBuiltDist = existsSync(path.resolve('dist', 'index.html'));
+  return !runningUnderTsx && hasBuiltDist;
+}
+
 async function main(): Promise<void> {
-  loadEnvFile();
-
-  let config;
-  try {
-    config = loadConfig();
-  } catch (error) {
-    log.error('invalid configuration', error);
-    process.exit(1);
-  }
-
+  const isProd = detectProductionMode();
+  const port = Number(process.env.PORT) || 3000;
+  const host = '0.0.0.0';
   const version = readPackageVersion();
-  const app = createApp({ config, version });
+
+  const app = createApp({ isProd, version });
 
   let closeVite: (() => Promise<void>) | undefined;
 
-  if (!config.isProd) {
+  if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true, hmr: false },
@@ -39,10 +41,10 @@ async function main(): Promise<void> {
     });
     app.use(vite.middlewares);
     closeVite = () => vite.close();
-  } else if (config.webDistPath) {
-    const webRoot = path.resolve(config.webDistPath);
+  } else {
+    const webRoot = path.resolve('dist');
     if (!existsSync(path.join(webRoot, 'index.html'))) {
-      log.error(`WEB_DIST_PATH has no index.html: ${webRoot}. Run "npm run build" first.`);
+      console.error(`Missing production build at ${webRoot}. Run "npm run build" first.`);
       process.exit(1);
     }
 
@@ -67,13 +69,13 @@ async function main(): Promise<void> {
 
   app.use(errorHandler);
 
-  const server = app.listen(config.port, config.host, () => {
-    const mode = config.isProd ? 'production' : 'development (vite middleware)';
-    log.info(`wittens ${version} listening on http://${config.host}:${config.port} [${mode}]`);
+  const server = app.listen(port, host, () => {
+    const mode = isProd ? 'production' : 'development (vite middleware)';
+    console.log(`[server] listening on http://${host}:${port} [${mode}]`);
   });
 
   function shutdown(signal: string): void {
-    log.info(`${signal} received, shutting down`);
+    console.log(`[server] ${signal} received, shutting down`);
     server.close(async () => {
       await closeVite?.().catch(() => undefined);
       process.exit(0);
@@ -87,6 +89,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  log.error('fatal startup error', error);
+  console.error('[server] fatal startup error', error);
   process.exit(1);
 });

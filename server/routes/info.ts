@@ -1,37 +1,37 @@
 import type { Request, Response } from 'express';
-import { log } from '../lib/log.ts';
 import { getInfo, HttpError, type RawFetcher } from '../lib/tiktok.ts';
 
-export interface HandleInfoOptions {
-  timeoutMs: number;
+export interface InfoRouteOptions {
+  timeoutMs?: number;
   fetcher?: RawFetcher;
 }
 
-/** Express handler for GET /api/info?url=... */
 export async function handleInfo(
   req: Request,
   res: Response,
-  options: HandleInfoOptions,
+  options: InfoRouteOptions = {},
 ): Promise<void> {
-  const rawUrl = typeof req.query.url === 'string' ? req.query.url : '';
-  res.setHeader('Cache-Control', 'no-store');
+  const send = (status: number, body: unknown): void => {
+    res.status(status);
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(body);
+  };
 
+  if (req.method !== 'GET') {
+    send(405, { error: { code: 'method', message: 'Use GET.' } });
+    return;
+  }
+
+  const urlParam = typeof req.query.url === 'string' ? req.query.url : '';
   try {
-    const info = await getInfo(rawUrl, {
-      signal: AbortSignal.timeout(options.timeoutMs),
-      fetcher: options.fetcher,
-    });
-    res.status(200).json(info);
+    const info = await getInfo(urlParam, options);
+    send(200, info);
   } catch (error) {
     if (error instanceof HttpError) {
-      res.status(error.status).json({
-        error: { code: error.code, message: error.message },
-      });
+      send(error.status, { error: { code: error.code, message: error.message } });
       return;
     }
-    log.error('[info]', error);
-    res.status(500).json({
-      error: { code: 'internal', message: 'Something went wrong on our side.' },
-    });
+    console.error('[info]', error);
+    send(500, { error: { code: 'internal', message: 'Server error while fetching post.' } });
   }
 }

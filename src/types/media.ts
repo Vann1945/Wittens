@@ -19,6 +19,14 @@ export interface PhotoSlideItem extends WrappedAsset {
   live: WrappedAsset | null;
 }
 
+export interface MusicAsset extends WrappedAsset {
+  title: string;
+  author: string;
+  duration: number;
+  original: boolean;
+  cover: WrappedAsset | null;
+}
+
 export interface TikTokInfoResponse {
   id: string;
   type: 'photo' | 'video';
@@ -38,13 +46,7 @@ export interface TikTokInfoResponse {
     shares: number;
     saves: number;
   };
-  music: (WrappedAsset & {
-    title: string;
-    author: string;
-    duration: number;
-    original: boolean;
-    cover: WrappedAsset | null;
-  }) | null;
+  music: MusicAsset | null;
   cover: WrappedAsset | null;
   video: {
     width: number;
@@ -57,10 +59,14 @@ export interface TikTokInfoResponse {
   images: PhotoSlideItem[];
 }
 
+export interface DownloadOption {
+  url: string;
+  filename?: string;
+}
+
 export interface ResolvedVideo {
   id: string;
   type: 'photo' | 'video';
-  sourceUrl: string;
   title: string;
   authorName: string;
   authorHandle: string;
@@ -68,16 +74,21 @@ export interface ResolvedVideo {
   likeCount: number | null;
   viewCount: number | null;
   coverUrl: string | null;
+  coverDownloadUrl: string | null;
   previewUrl: string | null;
+  sourceUrl: string;
   qualities: VideoQualityOption[];
   images: PhotoSlideItem[];
+  music: MusicAsset | null;
   downloads: {
-    hd: { url: string; sizeBytes: number | null } | null;
-    sd: { url: string; sizeBytes: number | null } | null;
-    audio: { url: string } | null;
+    hd: DownloadOption | null;
+    sd: DownloadOption | null;
+    audio: DownloadOption | null;
   };
 }
 
-export type ResolveResponse =
-  | { status: 'ok'; video: ResolvedVideo }
-  | { status: 'error'; error: { code: string; message: string } };
+export interface DownloadProgress {
+  loaded: number;
+  total: number | null;
+  percent: number | null;
+}

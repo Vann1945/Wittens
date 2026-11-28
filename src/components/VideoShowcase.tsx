@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
+  Check,
   ChevronLeft,
   ChevronRight,
   Eye,
@@ -13,26 +14,14 @@ import {
   Play,
   Volume2,
   VolumeX,
+  X,
 } from 'lucide-react';
 import { DownloadTrayIcon } from './Icons';
+import { downloadMediaWithProgress } from '../services/tiktokApi';
+import type { DownloadProgress, ResolvedVideo } from '../types/media';
 import { parseCaptionAndHashtags, truncateAtWord } from '../utils/caption';
-import type { PhotoSlideItem, ResolvedVideo, VideoQualityOption } from '../types';
 
-export interface VideoShowcaseData {
-  id: string;
-  type?: 'photo' | 'video';
-  title: string;
-  authorName: string;
-  authorHandle: string;
-  duration: number;
-  likeCount?: number | null;
-  viewCount?: number | null;
-  coverUrl: string | null;
-  previewUrl?: string | null;
-  qualities?: VideoQualityOption[];
-  images?: PhotoSlideItem[];
-  downloads: ResolvedVideo['downloads'];
-}
+export type VideoShowcaseData = ResolvedVideo;
 
 interface VideoShowcaseProps {
   video: VideoShowcaseData;
@@ -40,6 +29,14 @@ interface VideoShowcaseProps {
   isLoadingStream?: boolean;
   streamError?: string | null;
   onStreamError?: () => void;
+}
+
+type DownloadKind = 'video' | 'audio' | 'photo' | 'live' | 'cover';
+
+interface ActiveDownloadState {
+  kind: DownloadKind;
+  label: string;
+  progress: DownloadProgress;
 }
 
 const CAPTION_COLLAPSE_LIMIT = 140;
@@ -74,6 +71,7 @@ export function VideoShowcase({
   onStreamError,
 }: VideoShowcaseProps) {
   const [coverFailed, setCoverFailed] = useState(false);
+  const [thumbFailed, setThumbFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
     typeof window !== 'undefined'
@@ -96,7 +94,9 @@ export function VideoShowcase({
   const [currentTime, setCurrentTime] = useState(0);
   const [mediaDuration, setMediaDuration] = useState(video.duration || 0);
   const [isCaptionExpanded, setIsCaptionExpanded] = useState(false);
-  const [downloadFeedback, setDownloadFeedback] = useState<'video' | 'audio' | 'photo' | 'live' | null>(null);
+  const [activeDownload, setActiveDownload] = useState<ActiveDownloadState | null>(null);
+  const [completedDownload, setCompletedDownload] = useState<DownloadKind | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
   const [selectedQualityIndex, setSelectedQualityIndex] = useState(0);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
   const [shouldLoadPlayer, setShouldLoadPlayer] = useState(() => {
@@ -112,7 +112,8 @@ export function VideoShowcase({
   const playbackSpeedRef = useRef(playbackSpeed);
   const hideControlsTimerRef = useRef<number | null>(null);
   const pendingClickTimerRef = useRef<number | null>(null);
-  const feedbackTimerRef = useRef<number | null>(null);
+  const completedTimerRef = useRef<number | null>(null);
+  const downloadAbortRef = useRef<AbortController | null>(null);
 
   isMutedRef.current = isMuted;
   playbackSpeedRef.current = playbackSpeed;
@@ -139,26 +140,38 @@ export function VideoShowcase({
     }, 2800);
   }
 
+  function cancelActiveDownload() {
+    downloadAbortRef.current?.abort();
+    downloadAbortRef.current = null;
+    setActiveDownload(null);
+  }
+
   useEffect(() => {
     return () => {
       clearHideControlsTimer();
       clearPendingClickTimer();
-      if (feedbackTimerRef.current !== null) {
-        window.clearTimeout(feedbackTimerRef.current);
+      downloadAbortRef.current?.abort();
+      if (completedTimerRef.current !== null) {
+        window.clearTimeout(completedTimerRef.current);
       }
     };
   }, []);
 
-  // Reset per-video state when switching videos
+  // Reset per-video state when switching posts
   useEffect(() => {
     clearHideControlsTimer();
     clearPendingClickTimer();
+    downloadAbortRef.current?.abort();
+    downloadAbortRef.current = null;
     setCoverFailed(false);
+    setThumbFailed(false);
     setVideoFailed(false);
     setCurrentTime(0);
     setMediaDuration(video.duration || 0);
     setIsCaptionExpanded(false);
-    setDownloadFeedback(null);
+    setActiveDownload(null);
+    setCompletedDownload(null);
+    setDownloadError(null);
     setSelectedQualityIndex(0);
     setActiveSlideIndex(0);
     setIsPaused(prefersReducedMotion);
@@ -174,6 +187,7 @@ export function VideoShowcase({
   const images = video.images ?? [];
   const isPhotoPost = video.type === 'photo' && images.length > 0;
   const activeSlide = isPhotoPost ? images[Math.min(activeSlideIndex, images.length - 1)] : null;
+  const cardPreviewImage = (isPhotoPost ? activeSlide?.src : video.coverUrl) ?? video.coverUrl;
 
   // Keep playbackRate synced to the active video element
   useEffect(() => {
@@ -247,13 +261,12 @@ export function VideoShowcase({
     setIsPaused(false);
     setShowControls(false);
     void el.play().catch(() => {
-      // Browser blocked unmuted autoplay before user interaction; keep sound enabled and show play UI
       setIsPaused(true);
       setShowControls(true);
     });
   }, [activePreviewUrl, isPhotoPost, shouldLoadPlayer, prefersReducedMotion]);
 
-  // Real-time clock overlay updates via requestAnimationFrame while playing
+  // Real-time clock & playback progress updates via requestAnimationFrame while playing
   useEffect(() => {
     if (isPaused || !shouldLoadPlayer || !activePreviewUrl || isPhotoPost) return;
     let rafId = 0;
@@ -262,7 +275,7 @@ export function VideoShowcase({
       const el = videoRef.current;
       if (el && !el.paused) {
         const t = el.currentTime;
-        setCurrentTime((prev) => (Math.floor(prev * 10) !== Math.floor(t * 10) ? t : prev));
+        setCurrentTime((prev) => (Math.floor(prev * 20) !== Math.floor(t * 20) ? t : prev));
         rafId = window.requestAnimationFrame(syncClock);
       }
     };
@@ -299,7 +312,6 @@ export function VideoShowcase({
     clearPendingClickTimer();
     pendingClickTimerRef.current = window.setTimeout(() => {
       pendingClickTimerRef.current = null;
-      // Single press toggles player controls without pausing playback
       setShowControls((prev) => {
         const next = !prev;
         if (next && !el.paused) {
@@ -327,7 +339,6 @@ export function VideoShowcase({
     if (!el) return;
 
     if (!el.paused) {
-      // 1st double-click while playing: pause and show player UI
       el.pause();
       setIsPaused(true);
       setShowControls(true);
@@ -335,12 +346,10 @@ export function VideoShowcase({
     }
 
     if (showControls) {
-      // 2nd double-click while paused with UI: return to normal mode without player UI and stay stopped
       setShowControls(false);
       return;
     }
 
-    // Double-click from paused normal mode (no UI): resume playing without UI
     setIsPaused(false);
     setShowControls(false);
     el.muted = isMuted;
@@ -414,15 +423,62 @@ export function VideoShowcase({
     }
   }
 
-  function triggerDownloadNotice(kind: 'video' | 'audio' | 'photo' | 'live') {
-    setDownloadFeedback(kind);
-    if (feedbackTimerRef.current !== null) {
-      window.clearTimeout(feedbackTimerRef.current);
+  async function startTrackedDownload(
+    kind: DownloadKind,
+    downloadUrl: string,
+    label: string,
+    fallbackFilename: string,
+  ) {
+    downloadAbortRef.current?.abort();
+    const controller = new AbortController();
+    downloadAbortRef.current = controller;
+
+    setDownloadError(null);
+    setCompletedDownload(null);
+    setActiveDownload({
+      kind,
+      label,
+      progress: { loaded: 0, total: null, percent: 0 },
+    });
+
+    try {
+      await downloadMediaWithProgress(
+        downloadUrl,
+        fallbackFilename,
+        (progress) => {
+          if (downloadAbortRef.current === controller) {
+            setActiveDownload({ kind, label, progress });
+          }
+        },
+        controller.signal,
+      );
+
+      if (downloadAbortRef.current === controller) {
+        downloadAbortRef.current = null;
+        setActiveDownload(null);
+        setCompletedDownload(kind);
+        if (completedTimerRef.current !== null) {
+          window.clearTimeout(completedTimerRef.current);
+        }
+        completedTimerRef.current = window.setTimeout(() => {
+          setCompletedDownload(null);
+          completedTimerRef.current = null;
+        }, 2400);
+      }
+    } catch (error) {
+      if (downloadAbortRef.current === controller) {
+        downloadAbortRef.current = null;
+        setActiveDownload(null);
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          return;
+        }
+        const message =
+          error instanceof Error && error.message
+            ? error.message
+            : 'Could not save this file. Try again.';
+        setDownloadError(message);
+      }
     }
-    feedbackTimerRef.current = window.setTimeout(() => {
-      setDownloadFeedback(null);
-      feedbackTimerRef.current = null;
-    }, 2000);
   }
 
   const { caption, hashtags } = useMemo(
@@ -439,6 +495,7 @@ export function VideoShowcase({
   const totalDuration = mediaDuration > 0 ? mediaDuration : video.duration || 0;
   const sliderMax = totalDuration > 0 ? totalDuration : 100;
   const sliderValue = totalDuration > 0 ? Math.min(currentTime, totalDuration) : 0;
+  const playbackRatio = totalDuration > 0 ? Math.max(0, Math.min(1, sliderValue / totalDuration)) : 0;
 
   const scrubberStyle = {
     '--attr-min': 0,
@@ -448,10 +505,11 @@ export function VideoShowcase({
 
   const hasLikes = typeof video.likeCount === 'number' && video.likeCount >= 0;
   const hasViews = typeof video.viewCount === 'number' && video.viewCount >= 0;
+  const isDownloading = activeDownload !== null;
 
   return (
     <div className="grid w-full grid-cols-1 gap-6 md:grid-cols-[minmax(0,380px)_minmax(0,1fr)] md:items-start">
-      {/* 1. Standalone Video Player */}
+      {/* 1. Standalone Video / Image Viewer */}
       <div className="w-full">
         <div
           ref={playerFrameRef}
@@ -462,7 +520,7 @@ export function VideoShowcase({
               <img
                 key={activeSlide.src}
                 src={activeSlide.src}
-                alt={`${video.title} — photo ${activeSlideIndex + 1} of ${images.length}`}
+                alt={`${video.title || 'TikTok post'} — photo ${activeSlideIndex + 1} of ${images.length}`}
                 referrerPolicy="no-referrer"
                 className="h-full w-full bg-black object-contain"
               />
@@ -477,7 +535,7 @@ export function VideoShowcase({
                       setActiveSlideIndex((idx) => (idx - 1 + images.length) % images.length)
                     }
                     aria-label="Previous photo"
-                    className="absolute left-3 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                   >
                     <ChevronLeft className="h-5 w-5" aria-hidden="true" />
                   </button>
@@ -485,10 +543,20 @@ export function VideoShowcase({
                     type="button"
                     onClick={() => setActiveSlideIndex((idx) => (idx + 1) % images.length)}
                     aria-label="Next photo"
-                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-10 w-10 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 flex h-11 w-11 items-center justify-center rounded-full bg-black/60 text-white backdrop-blur-sm hover:bg-black/80 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
                   >
                     <ChevronRight className="h-5 w-5" aria-hidden="true" />
                   </button>
+                  {/* Slide progress indicator bar along bottom edge */}
+                  <div
+                    aria-hidden="true"
+                    className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20"
+                  >
+                    <div
+                      className="h-full w-full origin-left bg-white transition-transform duration-200 ease-out"
+                      style={{ transform: `scaleX(${(activeSlideIndex + 1) / images.length})` }}
+                    />
+                  </div>
                 </>
               ) : null}
             </>
@@ -570,7 +638,20 @@ export function VideoShowcase({
                 <span className="text-white/75">{formatTime(totalDuration)}</span>
               </div>
 
-              {/* Player UI is shown only when showControls is active; hides cleanly on second double-click while staying paused */}
+              {/* Subtle persistent playback progress bar when controls are hidden */}
+              {!showControls ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-x-0 bottom-0 h-[3px] bg-white/20"
+                >
+                  <div
+                    className="h-full w-full origin-left bg-white"
+                    style={{ transform: `scaleX(${playbackRatio})` }}
+                  />
+                </div>
+              ) : null}
+
+              {/* Player controls shown on single-click or 1st double-click */}
               {showControls ? (
                 <>
                   <button
@@ -672,7 +753,7 @@ export function VideoShowcase({
           ) : video.coverUrl && !coverFailed ? (
             <img
               src={video.coverUrl}
-              alt={video.title}
+              alt={video.title || 'TikTok cover image'}
               width={540}
               height={960}
               referrerPolicy="no-referrer"
@@ -687,6 +768,40 @@ export function VideoShowcase({
           )}
         </div>
 
+        {/* Clickable photo gallery strip for multi-image TikTok posts */}
+        {isPhotoPost && images.length > 1 ? (
+          <div
+            className="mt-3 flex gap-2 overflow-x-auto pb-1"
+            role="list"
+            aria-label="Post photos"
+          >
+            {images.map((slide, idx) => {
+              const isSelected = idx === activeSlideIndex;
+              return (
+                <button
+                  key={`${slide.src}-${idx}`}
+                  type="button"
+                  onClick={() => setActiveSlideIndex(idx)}
+                  aria-label={`View photo ${idx + 1} of ${images.length}`}
+                  aria-current={isSelected ? 'true' : undefined}
+                  className={`relative h-16 w-12 shrink-0 overflow-hidden rounded-xl border transition-opacity cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white ${
+                    isSelected
+                      ? 'border-white opacity-100'
+                      : 'border-white/15 opacity-55 hover:opacity-90'
+                  }`}
+                >
+                  <img
+                    src={slide.src}
+                    alt=""
+                    referrerPolicy="no-referrer"
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
+
         {streamError ? (
           <p role="alert" className="mt-2.5 px-2 text-[13.5px] font-medium text-[#FF3B30]">
             {streamError}
@@ -696,9 +811,9 @@ export function VideoShowcase({
 
       {/* Right Column: Separate Description Card + Download Card */}
       <div className="flex min-w-0 flex-col gap-4">
-        {/* 2. Description Card: Likes | Views -> Caption (Read more / Read less) -> Separator -> Hashtags # */}
+        {/* 2. Description Card: Likes | Views -> Caption -> Separator -> Hashtags */}
         <div className="rounded-[26px] border border-white/10 bg-[#141414] p-6 sm:p-7">
-          {/* Row 1: Number of likes | views side-by-side */}
+          {/* Row 1: Likes | Views */}
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 border-b border-white/[0.08] pb-4">
             <div className="flex items-center gap-1.5">
               <Heart className="h-4 w-4 text-[#8E8E93]" aria-hidden="true" />
@@ -721,7 +836,7 @@ export function VideoShowcase({
             </div>
           </div>
 
-          {/* Row 2: Caption with ... + Read more / Read less when long */}
+          {/* Row 2: Caption */}
           {caption ? (
             <p className="mt-4 text-[15.5px] font-normal leading-[1.68] text-[#F2F2F7] whitespace-pre-line">
               {displayedCaption}
@@ -740,7 +855,7 @@ export function VideoShowcase({
             </p>
           ) : null}
 
-          {/* Row 3: Separator + Hashtags # */}
+          {/* Row 3: Separator + Hashtags */}
           {hashtags.length > 0 ? (
             <div
               className={`${
@@ -756,10 +871,65 @@ export function VideoShowcase({
           ) : null}
         </div>
 
-        {/* 3. Separate Download Card */}
-        <div className="flex flex-col gap-2.5 rounded-[26px] border border-white/10 bg-[#141414] p-5">
+        {/* 3. Download Card: Image Preview + Progress Bar + Download & MP3 Buttons */}
+        <div className="flex flex-col gap-3 rounded-[26px] border border-white/10 bg-[#141414] p-5">
+          {/* Visible cover/post image header */}
+          <div className="flex items-center gap-3.5 border-b border-white/[0.08] pb-3.5">
+            <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-xl border border-white/12 bg-[#0B0B0C]">
+              {cardPreviewImage && !thumbFailed ? (
+                <img
+                  src={cardPreviewImage}
+                  alt={video.authorName ? `${video.authorName} post cover` : 'Post cover image'}
+                  referrerPolicy="no-referrer"
+                  onError={() => setThumbFailed(true)}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-[#636366]">
+                  <ImageIcon className="h-5 w-5" aria-hidden="true" />
+                </div>
+              )}
+            </div>
+
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-white">
+                {video.authorName || 'TikTok Creator'}
+              </p>
+              <p className="mt-0.5 truncate text-[13px] font-medium text-[#8E8E93]">
+                {video.authorHandle ? `@${video.authorHandle}` : isPhotoPost ? 'Photo post' : 'Video'}
+                {!isPhotoPost && totalDuration > 0 ? ` · ${formatTime(totalDuration)}` : ''}
+                {isPhotoPost ? ` · ${images.length} ${images.length === 1 ? 'photo' : 'photos'}` : ''}
+              </p>
+            </div>
+
+            {!isPhotoPost && video.coverDownloadUrl ? (
+              <button
+                type="button"
+                disabled={isDownloading}
+                onClick={() =>
+                  void startTrackedDownload(
+                    'cover',
+                    video.coverDownloadUrl!,
+                    'Downloading cover...',
+                    `tiktok_${video.id}_cover.jpg`,
+                  )
+                }
+                aria-label="Download cover image"
+                className="flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full border border-white/12 bg-[#1F1F21] px-3.5 text-[12.5px] font-medium text-[#E5E5EA] hover:border-white/25 hover:text-white disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
+              >
+                {completedDownload === 'cover' ? (
+                  <Check className="h-3.5 w-3.5 text-white" aria-hidden="true" />
+                ) : (
+                  <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
+                )}
+                <span>{completedDownload === 'cover' ? 'Saved' : 'Cover'}</span>
+              </button>
+            ) : null}
+          </div>
+
+          {/* Quality selector for multi-bitrate video posts */}
           {!isPhotoPost && qualities.length > 1 ? (
-            <div className="mb-1 flex flex-wrap gap-2" role="group" aria-label="Video quality">
+            <div className="flex flex-wrap gap-2" role="group" aria-label="Video quality">
               {qualities.map((q, idx) => {
                 const resLabel = `${Math.min(q.width || 0, q.height || 0) || 'HD'}p`;
                 const codecLabel = q.hevc ? ' HEVC' : '';
@@ -773,7 +943,7 @@ export function VideoShowcase({
                       setVideoFailed(false);
                     }}
                     aria-pressed={isSelected}
-                    className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold tabular-nums transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 ${
+                    className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold tabular-nums transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap ${
                       isSelected
                         ? 'bg-white text-[#0A0A0A]'
                         : 'bg-[#242426] text-[#D1D1D6] hover:bg-[#313134] hover:text-white'
@@ -787,60 +957,181 @@ export function VideoShowcase({
             </div>
           ) : null}
 
+          {/* Real-time download progress bar */}
+          {activeDownload ? (
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-2xl border border-white/10 bg-[#1B1B1D] px-4 py-3"
+            >
+              <div className="flex items-center justify-between gap-2 text-[13px]">
+                <span className="truncate font-medium text-white">
+                  {activeDownload.label}
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="font-semibold tabular-nums text-[#D1D1D6]">
+                    {activeDownload.progress.percent !== null
+                      ? `${activeDownload.progress.percent}%`
+                      : '...'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={cancelActiveDownload}
+                    aria-label="Cancel download"
+                    className="flex h-7 w-7 items-center justify-center rounded-full text-[#8E8E93] hover:bg-white/10 hover:text-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+              <div
+                role="progressbar"
+                aria-label={activeDownload.label}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={activeDownload.progress.percent ?? undefined}
+                className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-white/15"
+              >
+                {activeDownload.progress.percent !== null ? (
+                  <div
+                    className="h-full w-full origin-left rounded-full bg-white transition-transform duration-150 ease-out"
+                    style={{
+                      transform: `scaleX(${Math.max(0.02, activeDownload.progress.percent / 100)})`,
+                    }}
+                  />
+                ) : (
+                  <div className="download-progress-indeterminate h-full w-2/5 rounded-full bg-white" />
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {downloadError ? (
+            <p role="alert" className="px-1 text-[13px] font-medium text-[#FF3B30]">
+              {downloadError}
+            </p>
+          ) : null}
+
+          {/* Primary Download button */}
           {isPhotoPost && activeSlide ? (
             <>
-              <a
-                href={activeSlide.dl}
-                download
-                onClick={() => triggerDownloadNotice('photo')}
-                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+              <button
+                type="button"
+                disabled={isDownloading}
+                onClick={() =>
+                  void startTrackedDownload(
+                    'photo',
+                    activeSlide.dl,
+                    images.length > 1
+                      ? `Downloading photo ${activeSlideIndex + 1}...`
+                      : 'Downloading photo...',
+                    `tiktok_${video.id}_${String(activeSlideIndex + 1).padStart(2, '0')}.jpg`,
+                  )
+                }
+                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 whitespace-nowrap"
               >
-                <ImageIcon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                {completedDownload === 'photo' ? (
+                  <Check className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                ) : (
+                  <ImageIcon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+                )}
                 <span>
-                  {downloadFeedback === 'photo'
-                    ? 'Starting download...'
-                    : images.length > 1
-                      ? `Download Photo ${activeSlideIndex + 1}`
-                      : 'Download Photo'}
+                  {activeDownload?.kind === 'photo'
+                    ? 'Downloading...'
+                    : completedDownload === 'photo'
+                      ? 'Saved'
+                      : images.length > 1
+                        ? `Download Photo ${activeSlideIndex + 1}`
+                        : 'Download Photo'}
                 </span>
-              </a>
+              </button>
 
               {activeSlide.live ? (
-                <a
-                  href={activeSlide.live.dl}
-                  download
-                  onClick={() => triggerDownloadNotice('live')}
-                  className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                <button
+                  type="button"
+                  disabled={isDownloading}
+                  onClick={() =>
+                    void startTrackedDownload(
+                      'live',
+                      activeSlide.live!.dl,
+                      'Downloading live photo...',
+                      `tiktok_${video.id}_${String(activeSlideIndex + 1).padStart(2, '0')}_live.mp4`,
+                    )
+                  }
+                  className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
                 >
-                  <Film className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  {completedDownload === 'live' ? (
+                    <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <Film className="h-4 w-4 shrink-0" aria-hidden="true" />
+                  )}
                   <span>
-                    {downloadFeedback === 'live' ? 'Starting Live Photo...' : 'Live Photo (MP4)'}
+                    {activeDownload?.kind === 'live'
+                      ? 'Downloading...'
+                      : completedDownload === 'live'
+                        ? 'Saved'
+                        : 'Live Photo (MP4)'}
                   </span>
-                </a>
+                </button>
               ) : null}
             </>
           ) : primaryDownloadUrl ? (
-            <a
-              href={primaryDownloadUrl}
-              download
-              onClick={() => triggerDownloadNotice('video')}
-              className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70"
+            <button
+              type="button"
+              disabled={isDownloading}
+              onClick={() =>
+                void startTrackedDownload(
+                  'video',
+                  primaryDownloadUrl,
+                  'Downloading video...',
+                  `tiktok_${video.id}.mp4`,
+                )
+              }
+              className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 whitespace-nowrap"
             >
-              <DownloadTrayIcon className="h-[18px] w-[18px] shrink-0" />
-              <span>{downloadFeedback === 'video' ? 'Starting download...' : 'Download'}</span>
-            </a>
+              {completedDownload === 'video' ? (
+                <Check className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
+              ) : (
+                <DownloadTrayIcon className="h-[18px] w-[18px] shrink-0" />
+              )}
+              <span>
+                {activeDownload?.kind === 'video'
+                  ? 'Downloading...'
+                  : completedDownload === 'video'
+                    ? 'Saved'
+                    : 'Download'}
+              </span>
+            </button>
           ) : null}
 
+          {/* Audio kept strictly as a button (no audio player element) */}
           {video.downloads.audio ? (
-            <a
-              href={video.downloads.audio.url}
-              download
-              onClick={() => triggerDownloadNotice('audio')}
-              className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+            <button
+              type="button"
+              disabled={isDownloading}
+              onClick={() =>
+                void startTrackedDownload(
+                  'audio',
+                  video.downloads.audio!.url,
+                  'Downloading MP3...',
+                  `tiktok_${video.id}.mp3`,
+                )
+              }
+              className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
             >
-              <Music className="h-4 w-4 shrink-0" aria-hidden="true" />
-              <span>{downloadFeedback === 'audio' ? 'Starting MP3...' : 'MP3'}</span>
-            </a>
+              {completedDownload === 'audio' ? (
+                <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+              ) : (
+                <Music className="h-4 w-4 shrink-0" aria-hidden="true" />
+              )}
+              <span>
+                {activeDownload?.kind === 'audio'
+                  ? 'Downloading MP3...'
+                  : completedDownload === 'audio'
+                    ? 'MP3 Saved'
+                    : 'MP3'}
+              </span>
+            </button>
           ) : null}
         </div>
       </div>

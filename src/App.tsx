@@ -4,9 +4,9 @@ import { Mascot } from './components/Mascot';
 import { DownloadButton } from './components/DownloadButton';
 import { ChainLinkIcon, PasteStackIcon } from './components/Icons';
 import { VideoResultCard } from './components/VideoResultCard';
-import type { VideoShowcaseData } from './components/VideoShowcase';
 import { useLenis } from './hooks/useLenis';
-import { resolveVideo, ResolveError } from './lib/api';
+import { resolveVideo, ResolveError } from './services/tiktokApi';
+import type { ResolvedVideo } from './types/media';
 
 const TIKTOK_URL_PATTERN = 'https?://([a-zA-Z0-9\\-]+\\.)*tiktok\\.com/.*';
 
@@ -29,10 +29,6 @@ function looksLikeTikTokUrl(value: string): boolean {
   }
 }
 
-interface ActiveViewVideo extends VideoShowcaseData {
-  sourceUrl: string;
-}
-
 export default function App() {
   useLenis();
 
@@ -44,15 +40,13 @@ export default function App() {
     message: string;
     canRetry?: boolean;
   } | null>(null);
-  const [activeVideo, setActiveVideo] = useState<ActiveViewVideo | null>(null);
+  const [activeVideo, setActiveVideo] = useState<ResolvedVideo | null>(null);
   const [isRefreshingStream, setIsRefreshingStream] = useState(false);
   const [streamError, setStreamError] = useState<string | null>(null);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const currentViewRef = useRef<HTMLDivElement>(null);
   const pasteTimerRef = useRef<number | null>(null);
-  // Tunnel links expire, so a failed preview gets ONE automatic refresh per video.
-  // Without this cap a stream that keeps failing would re-resolve in a loop.
   const autoRefreshedIdRef = useRef<string | null>(null);
   const feedbackId = useId();
 
@@ -99,9 +93,13 @@ export default function App() {
       });
     } catch (error) {
       const known = error instanceof ResolveError;
+      const safeMessage =
+        known && typeof error.message === 'string' && error.message.trim()
+          ? error.message.trim()
+          : 'Could not fetch this video. Check that it is public.';
       setFeedback({
         type: 'error',
-        message: known ? error.message : 'Could not fetch this video. Check that it is public.',
+        message: safeMessage,
         canRetry: known ? error.retryable : true,
       });
     } finally {
@@ -109,23 +107,25 @@ export default function App() {
     }
   }
 
-  async function refreshActiveStream(target: ActiveViewVideo) {
+  async function refreshActiveStream(target: ResolvedVideo) {
     if (!target.sourceUrl) return;
     setIsRefreshingStream(true);
     setStreamError(null);
     try {
       const video = await resolveVideo(target.sourceUrl);
-      const refreshed: ActiveViewVideo = {
+      const refreshed: ResolvedVideo = {
         ...video,
         sourceUrl: video.sourceUrl || target.sourceUrl,
       };
       setActiveVideo((current) => (current?.id === target.id ? refreshed : current));
     } catch (error) {
-      setStreamError(
-        error instanceof ResolveError
-          ? error.message
-          : 'Could not reload this video right now.',
-      );
+      const safeMessage =
+        error instanceof ResolveError &&
+        typeof error.message === 'string' &&
+        error.message.trim()
+          ? error.message.trim()
+          : 'Could not reload this video right now.';
+      setStreamError(safeMessage);
     } finally {
       setIsRefreshingStream(false);
     }

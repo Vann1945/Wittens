@@ -116,10 +116,28 @@
   animation: loading-dot-wave 1.05s ease-in-out infinite;
 }
 
+@keyframes download-progress-slide {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(260%);
+  }
+}
+
+.download-progress-indeterminate {
+  animation: download-progress-slide 1.2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .loading-dot {
     animation: none;
     opacity: 0.75;
+  }
+
+  .download-progress-indeterminate {
+    animation: none;
+    transform: translateX(75%);
   }
 }
 
