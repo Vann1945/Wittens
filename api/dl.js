@@ -1,15 +1,13 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
-import type { ReadableStream as NodeWebReadableStream } from 'node:stream/web';
 import {
   UA,
   HttpError,
   decodeToken,
   fetchFollow,
   isMediaHost,
-} from '../server/lib/tiktok.ts';
+} from '../server/lib/tiktok.js';
 
-const EXT: Record<string, string> = {
+const EXT = {
   'image/jpeg': 'jpg',
   'image/jpg': 'jpg',
   'image/png': 'png',
@@ -27,8 +25,8 @@ const EXT: Record<string, string> = {
 
 const VALID_RANGE_RE = /^bytes=\d*-\d*(?:,\s*\d*-\d*)*$/i;
 
-export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const fail = (status: number, code: string, message?: string): void => {
+export default async function handler(req, res) {
+  const fail = (status, code, message) => {
     res.statusCode = status;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -41,7 +39,7 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   }
 
   const query = new URL(req.url || '/', 'http://localhost').searchParams;
-  let token: { u?: unknown; c?: unknown };
+  let token;
   try {
     token = decodeToken(query.get('t'));
   } catch {
@@ -49,13 +47,13 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
     return;
   }
 
-  if (typeof token.u !== 'string' || !token.u) {
+  if (typeof token?.u !== 'string' || !token.u) {
     fail(400, 'bad_token', 'Invalid download token.');
     return;
   }
 
   const rawName = query.get('n') || 'tiktok';
-  const name = rawName.replace(/[^\w.-]+/g, '_').slice(0, 100) || 'tiktok';
+  const name = String(rawName).replace(/[^\w.-]+/g, '_').slice(0, 100) || 'tiktok';
   const inlineRequested = Boolean(query.get('inline'));
 
   const ac = new AbortController();
@@ -64,14 +62,14 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
   });
 
   try {
-    const headers: Record<string, string> = {
+    const headers = {
       'User-Agent': UA,
       Referer: 'https://www.tiktok.com/',
     };
     if (typeof token.c === 'string' && token.c) {
       headers.Cookie = token.c.slice(0, 2000);
     }
-    const rangeHeader = req.headers.range;
+    const rangeHeader = req.headers?.range;
     if (typeof rangeHeader === 'string' && VALID_RANGE_RE.test(rangeHeader)) {
       headers.Range = rangeHeader;
     }
@@ -119,11 +117,11 @@ export default async function handler(req: IncomingMessage, res: ServerResponse)
       return;
     }
 
-    const nodeStream = Readable.fromWeb(up.body as unknown as NodeWebReadableStream);
-    nodeStream.on('error', () => {
-      if (!res.writableEnded) res.destroy();
-    });
-    nodeStream.pipe(res);
+    Readable.fromWeb(up.body)
+      .on('error', () => {
+        if (!res.writableEnded) res.destroy();
+      })
+      .pipe(res);
   } catch (error) {
     if (res.headersSent) {
       res.destroy();

@@ -11,7 +11,7 @@ import {
   normalize,
   videoQualities,
   type RawFetcher,
-} from '../lib/tiktok.ts';
+} from '../lib/tiktok.js';
 
 async function withServer(
   tiktokFetcher: RawFetcher,

@@ -1,8 +1,7 @@
-import type { IncomingMessage, ServerResponse } from 'node:http';
-import { getInfo, HttpError } from '../server/lib/tiktok.ts';
+import { getInfo, HttpError } from '../server/lib/tiktok.js';
 
-export default async function handler(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  const send = (status: number, body: unknown): void => {
+export default async function handler(req, res) {
+  const send = (status, body) => {
     res.statusCode = status;
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('X-Content-Type-Options', 'nosniff');

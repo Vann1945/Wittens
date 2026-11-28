@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import { getInfo, HttpError, type RawFetcher } from '../lib/tiktok.ts';
+import { getInfo, HttpError, type RawFetcher } from '../lib/tiktok.js';
 
 export interface InfoRouteOptions {
   timeoutMs?: number;

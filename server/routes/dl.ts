@@ -8,7 +8,7 @@ import {
   fetchFollow,
   isMediaHost,
   type RawFetcher,
-} from '../lib/tiktok.ts';
+} from '../lib/tiktok.js';
 
 const EXT: Record<string, string> = {
   'image/jpeg': 'jpg',

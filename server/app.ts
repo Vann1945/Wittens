@@ -7,7 +7,7 @@ import express, {
   type Response,
 } from 'express';
 import rateLimit from 'express-rate-limit';
-import type { RawFetcher } from './lib/tiktok.ts';
+import type { RawFetcher } from './lib/tiktok.js';
 import { handleDownload } from './routes/dl.ts';
 import { handleInfo } from './routes/info.ts';
 
