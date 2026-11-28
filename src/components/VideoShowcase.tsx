@@ -9,14 +9,13 @@ import {
   Image as ImageIcon,
   Maximize,
   Minimize,
-  Music,
   Pause,
   Play,
   Volume2,
   VolumeX,
   X,
 } from 'lucide-react';
-import { DownloadTrayIcon } from './Icons';
+import { AudioCard } from './AudioCard';
 import { downloadMediaWithProgress } from '../services/tiktokApi';
 import type { DownloadProgress, ResolvedVideo } from '../types/media';
 import { parseCaptionAndHashtags, truncateAtWord } from '../utils/caption';
@@ -31,7 +30,7 @@ interface VideoShowcaseProps {
   onStreamError?: () => void;
 }
 
-type DownloadKind = 'video' | 'audio' | 'photo' | 'live' | 'cover';
+type DownloadKind = 'audio' | 'photo' | 'live';
 
 interface ActiveDownloadState {
   kind: DownloadKind;
@@ -71,7 +70,6 @@ export function VideoShowcase({
   onStreamError,
 }: VideoShowcaseProps) {
   const [coverFailed, setCoverFailed] = useState(false);
-  const [thumbFailed, setThumbFailed] = useState(false);
   const [videoFailed, setVideoFailed] = useState(false);
   const [prefersReducedMotion, setPrefersReducedMotion] = useState(() =>
     typeof window !== 'undefined'
@@ -97,8 +95,8 @@ export function VideoShowcase({
   const [activeDownload, setActiveDownload] = useState<ActiveDownloadState | null>(null);
   const [completedDownload, setCompletedDownload] = useState<DownloadKind | null>(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  const [selectedQualityIndex, setSelectedQualityIndex] = useState(0);
   const [activeSlideIndex, setActiveSlideIndex] = useState(0);
+  const [pauseAudioSignal, setPauseAudioSignal] = useState(0);
   const [shouldLoadPlayer, setShouldLoadPlayer] = useState(() => {
     if (!lazy) return true;
     return typeof HTMLMediaElement !== 'undefined'
@@ -164,7 +162,6 @@ export function VideoShowcase({
     downloadAbortRef.current?.abort();
     downloadAbortRef.current = null;
     setCoverFailed(false);
-    setThumbFailed(false);
     setVideoFailed(false);
     setCurrentTime(0);
     setMediaDuration(video.duration || 0);
@@ -172,22 +169,18 @@ export function VideoShowcase({
     setActiveDownload(null);
     setCompletedDownload(null);
     setDownloadError(null);
-    setSelectedQualityIndex(0);
     setActiveSlideIndex(0);
     setIsPaused(prefersReducedMotion);
     setShowControls(prefersReducedMotion);
   }, [video.id, video.previewUrl, video.duration, prefersReducedMotion]);
 
   const qualities = video.qualities ?? [];
-  const selectedQuality = qualities[selectedQualityIndex] ?? qualities[0] ?? null;
-  const activePreviewUrl = selectedQuality?.src ?? video.previewUrl ?? null;
-  const primaryDownloadUrl =
-    selectedQuality?.dl ?? video.downloads.hd?.url ?? video.downloads.sd?.url ?? null;
+  const primaryQuality = qualities[0] ?? null;
+  const activePreviewUrl = primaryQuality?.src ?? video.previewUrl ?? null;
 
   const images = video.images ?? [];
   const isPhotoPost = video.type === 'photo' && images.length > 0;
   const activeSlide = isPhotoPost ? images[Math.min(activeSlideIndex, images.length - 1)] : null;
-  const cardPreviewImage = (isPhotoPost ? activeSlide?.src : video.coverUrl) ?? video.coverUrl;
 
   // Keep playbackRate synced to the active video element
   useEffect(() => {
@@ -603,7 +596,10 @@ export function VideoShowcase({
                     setShowControls(false);
                   }
                 }}
-                onPlay={() => setIsPaused(false)}
+                onPlay={() => {
+                  setIsPaused(false);
+                  setPauseAudioSignal((n) => n + 1);
+                }}
                 onPlaying={() => setIsPaused(false)}
                 onPause={() => {
                   clearHideControlsTimer();
@@ -871,269 +867,159 @@ export function VideoShowcase({
           ) : null}
         </div>
 
-        {/* 3. Download Card: Image Preview + Progress Bar + Download & MP3 Buttons */}
-        <div className="flex flex-col gap-3 rounded-[26px] border border-white/10 bg-[#141414] p-5">
-          {/* Visible cover/post image header */}
-          <div className="flex items-center gap-3.5 border-b border-white/[0.08] pb-3.5">
-            <div className="relative h-16 w-12 shrink-0 overflow-hidden rounded-xl border border-white/12 bg-[#0B0B0C]">
-              {cardPreviewImage && !thumbFailed ? (
-                <img
-                  src={cardPreviewImage}
-                  alt={video.authorName ? `${video.authorName} post cover` : 'Post cover image'}
-                  referrerPolicy="no-referrer"
-                  onError={() => setThumbFailed(true)}
-                  className="h-full w-full object-cover"
-                />
-              ) : (
-                <div className="flex h-full w-full items-center justify-center text-[#636366]">
-                  <ImageIcon className="h-5 w-5" aria-hidden="true" />
-                </div>
-              )}
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-semibold tracking-[-0.01em] text-white">
-                {video.authorName || 'TikTok Creator'}
-              </p>
-              <p className="mt-0.5 truncate text-[13px] font-medium text-[#8E8E93]">
-                {video.authorHandle ? `@${video.authorHandle}` : isPhotoPost ? 'Photo post' : 'Video'}
-                {!isPhotoPost && totalDuration > 0 ? ` · ${formatTime(totalDuration)}` : ''}
-                {isPhotoPost ? ` · ${images.length} ${images.length === 1 ? 'photo' : 'photos'}` : ''}
-              </p>
-            </div>
-
-            {!isPhotoPost && video.coverDownloadUrl ? (
-              <button
-                type="button"
-                disabled={isDownloading}
-                onClick={() =>
-                  void startTrackedDownload(
-                    'cover',
-                    video.coverDownloadUrl!,
-                    'Downloading cover...',
-                    `tiktok_${video.id}_cover.jpg`,
-                  )
-                }
-                aria-label="Download cover image"
-                className="flex min-h-[40px] shrink-0 items-center gap-1.5 rounded-full border border-white/12 bg-[#1F1F21] px-3.5 text-[12.5px] font-medium text-[#E5E5EA] hover:border-white/25 hover:text-white disabled:opacity-50 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
-              >
-                {completedDownload === 'cover' ? (
-                  <Check className="h-3.5 w-3.5 text-white" aria-hidden="true" />
-                ) : (
-                  <ImageIcon className="h-3.5 w-3.5" aria-hidden="true" />
-                )}
-                <span>{completedDownload === 'cover' ? 'Saved' : 'Cover'}</span>
-              </button>
-            ) : null}
-          </div>
-
-          {/* Quality selector for multi-bitrate video posts */}
-          {!isPhotoPost && qualities.length > 1 ? (
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Video quality">
-              {qualities.map((q, idx) => {
-                const resLabel = `${Math.min(q.width || 0, q.height || 0) || 'HD'}p`;
-                const codecLabel = q.hevc ? ' HEVC' : '';
-                const isSelected = idx === selectedQualityIndex;
-                return (
-                  <button
-                    key={`${q.dl}-${idx}`}
-                    type="button"
-                    onClick={() => {
-                      setSelectedQualityIndex(idx);
-                      setVideoFailed(false);
-                    }}
-                    aria-pressed={isSelected}
-                    className={`rounded-full px-3 py-1.5 text-[12.5px] font-semibold tabular-nums transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap ${
-                      isSelected
-                        ? 'bg-white text-[#0A0A0A]'
-                        : 'bg-[#242426] text-[#D1D1D6] hover:bg-[#313134] hover:text-white'
-                    }`}
-                  >
-                    {resLabel}
-                    {codecLabel}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-
-          {/* Real-time download progress bar */}
-          {activeDownload ? (
-            <div
-              role="status"
-              aria-live="polite"
-              className="rounded-2xl border border-white/10 bg-[#1B1B1D] px-4 py-3"
-            >
-              <div className="flex items-center justify-between gap-2 text-[13px]">
-                <span className="truncate font-medium text-white">
-                  {activeDownload.label}
-                </span>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="font-semibold tabular-nums text-[#D1D1D6]">
-                    {activeDownload.progress.percent !== null
-                      ? `${activeDownload.progress.percent}%`
-                      : '...'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={cancelActiveDownload}
-                    aria-label="Cancel download"
-                    className="flex h-7 w-7 items-center justify-center rounded-full text-[#8E8E93] hover:bg-white/10 hover:text-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
-                  >
-                    <X className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
+        {/* 3. Photo Download Actions (shown only for photo slideshow posts) */}
+        {isPhotoPost && activeSlide ? (
+          <div className="flex flex-col gap-3 rounded-[26px] border border-white/10 bg-[#141414] p-5">
+            {activeDownload && activeDownload.kind !== 'audio' ? (
               <div
-                role="progressbar"
-                aria-label={activeDownload.label}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={activeDownload.progress.percent ?? undefined}
-                className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-white/15"
+                role="status"
+                aria-live="polite"
+                className="rounded-2xl border border-white/10 bg-[#1B1B1D] px-4 py-3"
               >
-                {activeDownload.progress.percent !== null ? (
-                  <div
-                    className="h-full w-full origin-left rounded-full bg-white transition-transform duration-150 ease-out"
-                    style={{
-                      transform: `scaleX(${Math.max(0.02, activeDownload.progress.percent / 100)})`,
-                    }}
-                  />
-                ) : (
-                  <div className="download-progress-indeterminate h-full w-2/5 rounded-full bg-white" />
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          {downloadError ? (
-            <p role="alert" className="px-1 text-[13px] font-medium text-[#FF3B30]">
-              {downloadError}
-            </p>
-          ) : null}
-
-          {/* Primary Download button */}
-          {isPhotoPost && activeSlide ? (
-            <>
-              <button
-                type="button"
-                disabled={isDownloading}
-                onClick={() =>
-                  void startTrackedDownload(
-                    'photo',
-                    activeSlide.dl,
-                    images.length > 1
-                      ? `Downloading photo ${activeSlideIndex + 1}...`
-                      : 'Downloading photo...',
-                    `tiktok_${video.id}_${String(activeSlideIndex + 1).padStart(2, '0')}.jpg`,
-                  )
-                }
-                className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 whitespace-nowrap"
-              >
-                {completedDownload === 'photo' ? (
-                  <Check className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-                ) : (
-                  <ImageIcon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
-                )}
-                <span>
-                  {activeDownload?.kind === 'photo'
-                    ? 'Downloading...'
-                    : completedDownload === 'photo'
-                      ? 'Saved'
-                      : images.length > 1
-                        ? `Download Photo ${activeSlideIndex + 1}`
-                        : 'Download Photo'}
-                </span>
-              </button>
-
-              {activeSlide.live ? (
-                <button
-                  type="button"
-                  disabled={isDownloading}
-                  onClick={() =>
-                    void startTrackedDownload(
-                      'live',
-                      activeSlide.live!.dl,
-                      'Downloading live photo...',
-                      `tiktok_${video.id}_${String(activeSlideIndex + 1).padStart(2, '0')}_live.mp4`,
-                    )
-                  }
-                  className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
-                >
-                  {completedDownload === 'live' ? (
-                    <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  ) : (
-                    <Film className="h-4 w-4 shrink-0" aria-hidden="true" />
-                  )}
-                  <span>
-                    {activeDownload?.kind === 'live'
-                      ? 'Downloading...'
-                      : completedDownload === 'live'
-                        ? 'Saved'
-                        : 'Live Photo (MP4)'}
+                <div className="flex items-center justify-between gap-2 text-[13px]">
+                  <span className="truncate font-medium text-white">
+                    {activeDownload.label}
                   </span>
-                </button>
-              ) : null}
-            </>
-          ) : primaryDownloadUrl ? (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="font-semibold tabular-nums text-[#D1D1D6]">
+                      {activeDownload.progress.percent !== null
+                        ? `${activeDownload.progress.percent}%`
+                        : '...'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={cancelActiveDownload}
+                      aria-label="Cancel download"
+                      className="flex h-7 w-7 items-center justify-center rounded-full text-[#8E8E93] hover:bg-white/10 hover:text-white cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60"
+                    >
+                      <X className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+                <div
+                  role="progressbar"
+                  aria-label={activeDownload.label}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={activeDownload.progress.percent ?? undefined}
+                  className="mt-2.5 h-1.5 w-full overflow-hidden rounded-full bg-white/15"
+                >
+                  {activeDownload.progress.percent !== null ? (
+                    <div
+                      className="h-full w-full origin-left rounded-full bg-white transition-transform duration-150 ease-out"
+                      style={{
+                        transform: `scaleX(${Math.max(0.02, activeDownload.progress.percent / 100)})`,
+                      }}
+                    />
+                  ) : (
+                    <div className="download-progress-indeterminate h-full w-2/5 rounded-full bg-white" />
+                  )}
+                </div>
+              </div>
+            ) : null}
+
             <button
               type="button"
               disabled={isDownloading}
               onClick={() =>
                 void startTrackedDownload(
-                  'video',
-                  primaryDownloadUrl,
-                  'Downloading video...',
-                  `tiktok_${video.id}.mp4`,
+                  'photo',
+                  activeSlide.dl,
+                  images.length > 1
+                    ? `Downloading photo ${activeSlideIndex + 1}...`
+                    : 'Downloading photo...',
+                  `tiktok_${video.id}_${String(activeSlideIndex + 1).padStart(2, '0')}.jpg`,
                 )
               }
               className="flex min-h-[54px] w-full items-center justify-center gap-2 rounded-full bg-white px-5 py-3 text-[15.5px] font-semibold tracking-[-0.01em] text-[#0A0A0A] hover:bg-[#EFEFF2] active:bg-[#DCDCE0] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70 whitespace-nowrap"
             >
-              {completedDownload === 'video' ? (
+              {completedDownload === 'photo' ? (
                 <Check className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
               ) : (
-                <DownloadTrayIcon className="h-[18px] w-[18px] shrink-0" />
+                <ImageIcon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />
               )}
               <span>
-                {activeDownload?.kind === 'video'
+                {activeDownload?.kind === 'photo'
                   ? 'Downloading...'
-                  : completedDownload === 'video'
+                  : completedDownload === 'photo'
                     ? 'Saved'
-                    : 'Download'}
+                    : images.length > 1
+                      ? `Download Photo ${activeSlideIndex + 1}`
+                      : 'Download Photo'}
               </span>
             </button>
-          ) : null}
 
-          {/* Audio kept strictly as a button (no audio player element) */}
-          {video.downloads.audio ? (
-            <button
-              type="button"
-              disabled={isDownloading}
-              onClick={() =>
-                void startTrackedDownload(
-                  'audio',
-                  video.downloads.audio!.url,
-                  'Downloading MP3...',
-                  `tiktok_${video.id}.mp3`,
-                )
+            {activeSlide.live ? (
+              <button
+                type="button"
+                disabled={isDownloading}
+                onClick={() =>
+                  void startTrackedDownload(
+                    'live',
+                    activeSlide.live!.dl,
+                    'Downloading live photo...',
+                    `tiktok_${video.id}_${String(activeSlideIndex + 1).padStart(2, '0')}_live.mp4`,
+                  )
+                }
+                className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
+              >
+                {completedDownload === 'live' ? (
+                  <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Film className="h-4 w-4 shrink-0" aria-hidden="true" />
+                )}
+                <span>
+                  {activeDownload?.kind === 'live'
+                    ? 'Downloading...'
+                    : completedDownload === 'live'
+                      ? 'Saved'
+                      : 'Live Photo (MP4)'}
+                </span>
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+
+        {downloadError ? (
+          <p role="alert" className="px-2 text-[13px] font-medium text-[#FF3B30]">
+            {downloadError}
+          </p>
+        ) : null}
+
+        {/* 4. Dedicated Audio / Music Card */}
+        {video.downloads.audio ? (
+          <AudioCard
+            music={video.music}
+            downloadUrl={video.downloads.audio.url}
+            fallbackCoverUrl={video.coverUrl}
+            fallbackAuthor={video.authorName || video.authorHandle}
+            fallbackDuration={totalDuration}
+            pauseSignal={pauseAudioSignal}
+            isDownloadingAny={isDownloading}
+            activeAudioDownload={
+              activeDownload?.kind === 'audio'
+                ? { label: activeDownload.label, progress: activeDownload.progress }
+                : null
+            }
+            isCompleted={completedDownload === 'audio'}
+            onAudioPlay={() => {
+              const el = videoRef.current;
+              if (el && !el.paused) {
+                el.pause();
+                setIsPaused(true);
               }
-              className="flex min-h-[50px] w-full items-center justify-center gap-2 rounded-full bg-[#242426] px-5 py-2.5 text-[14.5px] font-medium text-white hover:bg-[#313134] active:bg-[#3A3A3E] disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/60 whitespace-nowrap"
-            >
-              {completedDownload === 'audio' ? (
-                <Check className="h-4 w-4 shrink-0" aria-hidden="true" />
-              ) : (
-                <Music className="h-4 w-4 shrink-0" aria-hidden="true" />
-              )}
-              <span>
-                {activeDownload?.kind === 'audio'
-                  ? 'Downloading MP3...'
-                  : completedDownload === 'audio'
-                    ? 'MP3 Saved'
-                    : 'MP3'}
-              </span>
-            </button>
-          ) : null}
-        </div>
+            }}
+            onDownloadAudio={() =>
+              void startTrackedDownload(
+                'audio',
+                video.downloads.audio!.url,
+                'Downloading music...',
+                `tiktok_${video.id}.mp3`,
+              )
+            }
+            onCancelDownload={cancelActiveDownload}
+          />
+        ) : null}
       </div>
     </div>
   );

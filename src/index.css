@@ -88,10 +88,6 @@
   font-size: clamp(2.25rem, 1.55rem + 3vw, 2.875rem);
 }
 
-/* Post-interaction validity feedback without premature errors */
-.url-shell:has(input:user-invalid) {
-  box-shadow: inset 0 0 0 1.5px rgba(255, 59, 48, 0.72);
-}
 
 /* Named container for adaptive video and history layouts */
 .video-hub {
@@ -167,6 +163,11 @@ input[type="range"].video-scrubber {
   border-radius: 0;
   background: transparent;
   cursor: pointer;
+}
+
+input[type="range"].video-scrubber.audio-scrubber {
+  block-size: 2rem;
+  min-block-size: 2rem;
 }
 
 input[type="range"].video-scrubber:dir(rtl) {

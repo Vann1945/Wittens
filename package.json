@@ -6,7 +6,7 @@
   "description": "Paste a TikTok link, get the file, move on.",
   "license": "MIT",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "tsx server.ts",
